@@ -40,8 +40,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-uv-
 
-      - name: Install dependencies (including dev for tests)
-        run: uv sync --frozen --extra dev
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Install dev dependencies for testing
+        run: uv pip install pytest pytest-asyncio
 
       - name: Run logic tests
         env:
