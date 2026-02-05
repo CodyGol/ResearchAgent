@@ -40,10 +40,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-uv-
 
-      - name: Install dependencies
-        run: uv sync --frozen --no-dev
+      - name: Install dependencies (including dev for tests)
+        run: uv sync --frozen --extra dev
 
       - name: Run logic tests
+        env:
+          # Dummy API keys for tests (not used, but required for config import)
+          # Tests mock all API calls, so these are never actually used
+          ANTHROPIC_API_KEY: sk-test-dummy-key-for-ci-no-charges
+          TAVILY_API_KEY: tvly-test-dummy-key-for-ci-no-charges
         run: uv run pytest tests/test_logic.py -v --tb=short
 
   # Job 2: Docker Build Verification (Only if tests pass)
