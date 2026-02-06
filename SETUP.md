@@ -37,6 +37,12 @@ CACHE_TTL_HOURS=24
 # Research Configuration (Optional - defaults shown)
 MAX_RESEARCH_ITERATIONS=3
 QUALITY_THRESHOLD=0.7
+
+# LangSmith Observability (Optional - for tracing and debugging)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your-langsmith-api-key-here
+LANGCHAIN_PROJECT=ResearchAgentv2
+ENVIRONMENT=local-dev
 ```
 
 ## Step 2: Add Your API Keys
@@ -95,6 +101,31 @@ Supabase is optional but recommended for:
    - Run the SQL from `db/schema.sql`
 
 **Note:** If you skip Supabase, the system will work without caching/persistence.
+
+### Get Your LangSmith API Key (Optional - for Observability)
+
+1. Go to https://smith.langchain.com/
+2. Sign in or create an account
+3. Navigate to **Settings** → **API Keys**
+4. Click **Create API Key**
+5. Copy the key
+6. Add to `.env`:
+   ```env
+   LANGCHAIN_TRACING_V2=true
+   LANGCHAIN_API_KEY=your-langsmith-api-key-here
+   LANGCHAIN_PROJECT=ResearchAgentv2
+   ENVIRONMENT=local-dev
+   ```
+   
+   **Note:** `LANGCHAIN_PROJECT` should match your LangSmith project name. If the project doesn't exist, LangSmith will create it automatically.
+
+**Benefits of LangSmith:**
+- **Real-time tracing**: Watch agent execution in real-time
+- **Debugging**: See all LLM calls, prompts, and responses
+- **Performance metrics**: Track latency, token usage, costs
+- **Eval tracking**: All evaluation runs are automatically tagged
+
+**Note:** LangSmith is optional but highly recommended for debugging and monitoring.
 
 ## Step 4: Verify Setup
 

@@ -8,10 +8,11 @@ from typing import Any
 
 import pandas as pd
 from langchain_anthropic import ChatAnthropic
+from langchain_core.runnables import RunnableConfig
 from tabulate import tabulate
 
 from config import settings
-from graph import create_graph, create_run_config
+from graph import create_graph, create_run_config, get_langsmith_trace_url
 from state import AgentState
 
 
@@ -59,6 +60,7 @@ Return ONLY the number (0 or 1), no explanation."""
 async def run_agent_query(
     query: str,
     semaphore: asyncio.Semaphore,
+    category: str = "unknown",
 ) -> tuple[str, float]:
     """
     Run a single query through The Oracle agent.
@@ -66,6 +68,7 @@ async def run_agent_query(
     Args:
         query: The research query
         semaphore: Concurrency limiter
+        category: Test case category for tagging
         
     Returns:
         Tuple of (answer, latency_seconds)
@@ -76,7 +79,24 @@ async def run_agent_query(
         try:
             graph = create_graph()
             app = graph.compile()
-            run_config = create_run_config()
+            
+            # Create eval-specific config with additional tags for LangSmith
+            base_config = create_run_config()
+            base_metadata = getattr(base_config, "metadata", {}) or {}
+            base_tags = getattr(base_config, "tags", []) or []
+            
+            eval_config = RunnableConfig(
+                metadata={
+                    **base_metadata,
+                    "eval_query": query[:100],  # Truncate for metadata
+                    "eval_category": category,
+                },
+                tags=[
+                    *base_tags,
+                    "eval-run",
+                    f"eval-{category}",
+                ],
+            )
             
             initial_state: AgentState = {
                 "user_query": query,
@@ -89,22 +109,30 @@ async def run_agent_query(
                 "error": None,
             }
             
-            final_state = await app.ainvoke(initial_state, config=run_config)
+            final_state = await app.ainvoke(initial_state, config=eval_config)
             
             latency = time.time() - start_time
             
             if final_state.get("error"):
-                return f"ERROR: {final_state['error']}", latency
+                error_msg = f"ERROR: {final_state['error']}"
+                print(f"⚠️  Agent error for '{query[:50]}...': {error_msg}")
+                return error_msg, latency
             
             report = final_state.get("final_report")
             if not report:
-                return "ERROR: No report generated", latency
+                error_msg = "ERROR: No report generated"
+                print(f"⚠️  No report for '{query[:50]}...'")
+                return error_msg, latency
             
             return report.content, latency
             
         except Exception as e:
             latency = time.time() - start_time
-            return f"ERROR: {str(e)}", latency
+            error_msg = f"ERROR: {str(e)}"
+            print(f"⚠️  Exception for '{query[:50]}...': {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return error_msg, latency
 
 
 async def evaluate_single_case(
@@ -125,8 +153,8 @@ async def evaluate_single_case(
     expected = case["expected_answer"]
     category = case.get("category", "unknown")
     
-    # Run agent
-    actual_answer, latency = await run_agent_query(query, semaphore)
+    # Run agent (pass category for LangSmith tagging)
+    actual_answer, latency = await run_agent_query(query, semaphore, category=category)
     
     # Judge the answer (only if not an error)
     if actual_answer.startswith("ERROR"):
@@ -134,7 +162,7 @@ async def evaluate_single_case(
     else:
         grade = await evaluate_answer(query, actual_answer, expected)
     
-    return {
+    result = {
         "category": category,
         "query": query,
         "expected": expected,
@@ -142,6 +170,12 @@ async def evaluate_single_case(
         "grade": grade,
         "latency": round(latency, 2),
     }
+    
+    # Log failures for debugging
+    if grade == 0 and not actual_answer.startswith("ERROR"):
+        print(f"⚠️  Judge failed '{query[:50]}...' (not an error, but answer didn't match)")
+    
+    return result
 
 
 async def main():
@@ -154,6 +188,14 @@ async def main():
     
     with open(dataset_path, "r") as f:
         test_cases = json.load(f)
+    
+    # Check and print LangSmith trace URL (Rule 3.C: Observability)
+    trace_url = get_langsmith_trace_url()
+    if trace_url:
+        print(f"🛠️  View Traces: {trace_url}")
+        print(f"   (All {len(test_cases)} queries will be traced in this project)\n")
+    else:
+        print("⚠️  LangSmith tracing not enabled (set LANGCHAIN_TRACING_V2=true in .env)\n")
     
     print(f"🚀 Starting Evaluation: {len(test_cases)} test cases")
     print(f"⚡ Running in parallel (max 5 concurrent)...\n")
@@ -186,6 +228,17 @@ async def main():
     display_df["Grade"] = display_df["Grade"].map({1: "✅", 0: "❌"})
     
     print(tabulate(display_df, headers="keys", tablefmt="github", showindex=False))
+    
+    # Show actual answers for failed cases (for debugging)
+    failed_cases = df[df["grade"] == 0]
+    if len(failed_cases) > 0:
+        print("\n" + "=" * 100)
+        print("🔍 DEBUG: Failed Cases (showing actual answers)")
+        print("=" * 100)
+        for idx, row in failed_cases.iterrows():
+            print(f"\n❌ {row['category']}: {row['query']}")
+            print(f"   Expected: {row['expected']}")
+            print(f"   Actual: {row['actual']}")
     
     # Print summary
     print("\n" + "=" * 100)

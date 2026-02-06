@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from graph import create_graph
+from graph import create_graph, create_run_config, get_langsmith_trace_url
 from state import AgentState, FinalReport
 
 app = FastAPI(
@@ -79,8 +79,11 @@ async def research(request: ResearchRequest) -> ResearchResponse:
     }
 
     try:
-        # Execute graph
-        final_state = await app_instance.ainvoke(initial_state)
+        # Configure LangSmith tracing
+        run_config = create_run_config()
+        
+        # Execute graph with LangSmith config
+        final_state = await app_instance.ainvoke(initial_state, config=run_config)
 
         # Check for errors
         if final_state.get("error"):

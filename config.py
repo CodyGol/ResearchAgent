@@ -78,6 +78,19 @@ class Settings(BaseSettings):
         validation_alias="CACHE_TTL_HOURS",
     )
 
+    # LangSmith Observability Configuration
+    langchain_project: str = Field(
+        default="the-oracle",
+        description="LangSmith project name for tracing",
+        validation_alias="LANGCHAIN_PROJECT",
+    )
+
+    environment: str = Field(
+        default="local-dev",
+        description="Environment identifier (local-dev, staging, production)",
+        validation_alias="ENVIRONMENT",
+    )
+
 
 # Global settings instance
 try:

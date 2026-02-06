@@ -3,7 +3,7 @@
 import asyncio
 import sys
 
-from graph import create_graph
+from graph import create_graph, create_run_config, get_langsmith_trace_url
 from state import AgentState
 
 
@@ -16,6 +16,14 @@ async def run_research(query: str):
     """
     graph = create_graph()
     app = graph.compile()
+
+    # Configure LangSmith tracing
+    run_config = create_run_config()
+    
+    # Print trace URL at start (Rule 3.C: Observability)
+    trace_url = get_langsmith_trace_url()
+    if trace_url:
+        print(f"🛠️  View Trace: {trace_url}\n")
 
     # Initialize state
     initial_state: AgentState = {
@@ -33,8 +41,8 @@ async def run_research(query: str):
     print(f"Query: {query}\n")
     print("=" * 80)
 
-    # Execute graph
-    final_state = await app.ainvoke(initial_state)
+    # Execute graph with LangSmith config
+    final_state = await app.ainvoke(initial_state, config=run_config)
 
     # Display results
     print("\n" + "=" * 80)
