@@ -1,86 +1,49 @@
-# Multi-stage Dockerfile for The Oracle research agent
-# Using Python 3.12 slim for production deployment
+# Production Dockerfile for Google Cloud Run
+# Optimized for minimal size and fast startup
 
-# ============================================================================
-# Builder Stage: Install dependencies with uv
-# ============================================================================
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.12-slim
 
-# Install system dependencies for uv and build tools
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    build-essential \
+# Set environment variables for immediate log output
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install system dependencies (minimal)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
-
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy requirements first (for better layer caching)
+COPY requirements.txt .
 
-# Create virtual environment and install dependencies
-# uv sync should create .venv and install all dependencies
-RUN uv venv && \
-    uv sync --frozen --no-dev
-
-# Verify uvicorn is installed (check for uvicorn script in bin/)
-RUN if [ -f .venv/bin/uvicorn ]; then \
-        echo "✓ uvicorn found at .venv/bin/uvicorn"; \
-    else \
-        echo "ERROR: uvicorn not found!" && \
-        echo "Checking .venv/bin/:" && \
-        ls -la .venv/bin/ | head -20 && \
-        echo "Installed packages:" && \
-        uv pip list && \
-        exit 1; \
-    fi
-
-# ============================================================================
-# Final Stage: Production image
-# ============================================================================
-FROM python:3.12-slim-bookworm
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Create non-root user for security
-RUN groupadd -r appuser && useradd -r -g appuser appuser
-
-# Set working directory
-WORKDIR /app
-
-# Copy virtual environment from builder
-COPY --from=builder /app/.venv /app/.venv
+# Install Python dependencies
+# Remove local file reference if present and install from requirements
+RUN sed -i '/^-e file:/d' requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY config.py graph.py state.py server.py run_research.py ./
+COPY config.py graph.py state.py api.py ./
 COPY nodes/ ./nodes/
 COPY tools/ ./tools/
 COPY utils/ ./utils/
 COPY db/ ./db/
 
-# Set Python path to use virtual environment
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
 
-# Change ownership to non-root user
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
 USER appuser
 
-# Expose API port
-EXPOSE 8000
+# Expose port (Cloud Run will set PORT env var)
+EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Health check (Cloud Run handles this via /health endpoint)
+# Note: HEALTHCHECK is optional for Cloud Run as it uses the /health endpoint directly
 
-# Run the API server using uvicorn directly from venv bin
-CMD ["/app/.venv/bin/uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the API server
+CMD ["python", "api.py"]

@@ -1,30 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
-.venv/
-venv/
-ENV/
-env/
+# Git
+.git
+.gitignore
+.gitattributes
 
 # Environment Variables & Secrets (CRITICAL)
 .env
@@ -36,6 +13,39 @@ env/
 secrets/
 .secrets/
 
+# Virtual Environment
+venv
+.venv
+ENV
+env
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist/
+build/
+*.egg-info/
+
+# Testing
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Documentation
+*.md
+docs/
+SETUP.md
+USAGE_GUIDE.md
+README.md
+DOCKER.md
+
 # IDE
 .vscode/
 .idea/
@@ -43,12 +53,6 @@ secrets/
 *.swp
 *.swo
 *~
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-tests/
 
 # Logs
 *.log
@@ -58,22 +62,7 @@ tests/
 .DS_Store
 .DS_Store?
 ._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
-
-# Git
-.git/
-.gitignore
-.gitattributes
-
-# Documentation (not needed in container)
-*.md
-docs/
-SETUP.md
-USAGE_GUIDE.md
-README.md
 
 # Database
 *.db
@@ -84,11 +73,14 @@ README.md
 traces.jsonl
 *.trace
 
-# Build artifacts (uv.lock is needed for reproducible builds, so we keep it)
-# Note: uv.lock is NOT ignored - it's required for deterministic builds
-
 # Temporary files
 *.tmp
 *.temp
 fix_env.py
 test_supabase.py
+run_eval.py
+run_research.py
+server.py
+pytest.ini
+uv.lock
+pyproject.toml
