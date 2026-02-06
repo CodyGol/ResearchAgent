@@ -1,0 +1,27 @@
+[
+  {
+    "category": "factual",
+    "query": "Who won the 2023 F1 World Championship and which team did they drive for?",
+    "expected_answer": "Max Verstappen won the 2023 F1 World Championship driving for Red Bull Racing."
+  },
+  {
+    "category": "technical_reasoning",
+    "query": "Explain the relationship between 'Context Window' and 'RAG' in modern LLM architecture.",
+    "expected_answer": "RAG (Retrieval-Augmented Generation) is a technique to overcome the limitations of a Context Window. Instead of fitting all data into the prompt (Context), RAG retrieves only the relevant chunks dynamically."
+  },
+  {
+    "category": "multi_hop_search",
+    "query": "What is the release date of the sequel to the movie 'Dune' (2021), and who directed it?",
+    "expected_answer": "Dune: Part Two was released on March 1, 2024 (in the US), directed by Denis Villeneuve."
+  },
+  {
+    "category": "coding_concept",
+    "query": "What Python library is standard for asynchronous HTTP requests?",
+    "expected_answer": "aiohttp or httpx."
+  },
+  {
+    "category": "trick_question",
+    "query": "Who was the President of the United States in 1600?",
+    "expected_answer": "There was no President of the United States in 1600 (the US did not exist)."
+  }
+]
