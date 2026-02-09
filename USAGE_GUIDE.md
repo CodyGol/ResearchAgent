@@ -1,33 +1,44 @@
-# The Oracle - Usage & Leverage Guide
+# ResearchAgentv2 - Complete Usage Guide
 
-## 🎯 Core Use Cases
+## 🎯 System Overview
 
-### 1. Deep Research Reports
-Perfect for comprehensive research on complex topics that require:
-- Multiple angles and perspectives
-- Recent developments verification
-- Source diversity and credibility checks
-- Self-correcting quality assurance
-
-**Example:**
-```python
-query = "What are the latest developments in quantum computing error correction?"
-```
-
-### 2. Competitive Intelligence
-Research competitors, market trends, or industry analysis with automatic quality checks.
-
-### 3. Technical Deep Dives
-Get comprehensive technical reports on emerging technologies, frameworks, or methodologies.
-
-### 4. Academic Research Support
-Generate well-sourced research reports with citations for academic or professional work.
+ResearchAgentv2 is a production-grade recursive deep-research agent system with:
+- **Backend**: FastAPI service deployed on Google Cloud Run
+- **Frontend**: Next.js Generative UI (Terminal-style interface)
+- **Agent**: LangGraph state machine with 4 nodes (Planner → Researcher → Critic → Writer)
+- **Observability**: LangSmith tracing and structured logging
+- **Evaluation**: Automated testing with LLM-as-a-Judge
 
 ---
 
-## 🚀 Basic Usage
+## 🚀 Quick Start
 
-### Simple Execution
+### Option 1: Web UI (Recommended)
+
+1. **Start the frontend**:
+   ```bash
+   cd research-client
+   npm install
+   npm run dev
+   ```
+
+2. **Configure backend URL**:
+   Create `research-client/.env.local`:
+   ```env
+   NEXT_PUBLIC_BACKEND_URL=https://research-agent-v2-69957378560.us-central1.run.app
+   ```
+
+3. **Open browser**: http://localhost:3000
+
+4. **Enter query** and click "RESEARCH"
+
+### Option 2: Command Line
+
+```bash
+python run_research.py "Your research query here"
+```
+
+### Option 3: Python API
 
 ```python
 from graph import create_graph
@@ -49,82 +60,99 @@ async def research(query: str):
     }
     
     result = await app.ainvoke(initial_state)
-    return result
+    return result["final_report"]
 
 # Run it
-result = asyncio.run(research("Latest AI safety research"))
-print(result["final_report"].content)
+report = asyncio.run(research("Latest AI safety research"))
+print(report.content)
 ```
 
-### Batch Processing
+### Option 4: REST API
 
-```python
-async def batch_research(queries: list[str]):
-    graph = create_graph()
-    app = graph.compile()
-    
-    results = []
-    for query in queries:
-        state = {
-            "user_query": query,
-            "research_plan": None,
-            "research_results": None,
-            "critique": None,
-            "final_report": None,
-            "current_node": "planner",
-            "iteration_count": 0,
-            "error": None,
-        }
-        result = await app.ainvoke(state)
-        results.append(result)
-    
-    return results
+```bash
+curl -X POST https://research-agent-v2-69957378560.us-central1.run.app/research \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What are the latest developments in quantum computing?"}'
 ```
 
 ---
 
-## ⚙️ Customization & Configuration
+## 🎨 Frontend Usage (Deep Research Console)
 
-### 1. Adjust Quality Thresholds
+### Features
 
-Edit `.env`:
+- **Non-blocking UI**: Handles requests up to 10 minutes without freezing
+- **Accurate Timer**: Uses `requestAnimationFrame` to prevent browser throttling
+- **Real-time Updates**: Shows execution time (`T+ [seconds]`) with blinking cursor
+- **Smooth Animations**: Framer Motion fade-in when results arrive
+- **Error Handling**: Robust error boundaries and timeout handling
+- **Terminal Aesthetic**: Black background, green monospace font
+
+### Usage Flow
+
+1. Enter your research query in the input field
+2. Click "RESEARCH" button
+3. Watch the timer (`T+ X.Xs`) and blinking cursor
+4. Results fade in when complete
+5. View report, sources, confidence score, and metadata
+6. Click "New Query" to start over
+
+---
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+Create `.env` file in project root:
+
+```env
+# Required
+ANTHROPIC_API_KEY=sk-ant-...
+TAVILY_API_KEY=tvly-...
+
+# Optional - Supabase (for caching)
+SUPABASE_URL=https://xxx.supabase.co
+SUPABASE_KEY=xxx
+ENABLE_CACHING=true
+CACHE_TTL_HOURS=24
+
+# Optional - LangSmith (for observability)
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=ls-...
+LANGCHAIN_PROJECT=ResearchAgentv2
+ENVIRONMENT=local-dev
+
+# Optional - Research Settings
+MAX_RESEARCH_ITERATIONS=3
+QUALITY_THRESHOLD=0.7
+```
+
+### Adjust Quality Thresholds
+
 ```env
 QUALITY_THRESHOLD=0.8  # Higher = stricter quality requirements
 MAX_RESEARCH_ITERATIONS=5  # More refinement cycles
 ```
 
-### 2. Customize Node Behavior
-
-#### Modify Planner Prompts
-Edit `nodes/planner.py` to change how research plans are generated:
-- Add domain-specific instructions
-- Change sub-query generation strategy
-- Adjust search term extraction
-
-#### Customize Critic Evaluation
-Edit `nodes/critic.py` to:
-- Add custom quality criteria
-- Change evaluation weights
-- Modify freshness requirements
-
-#### Tune Writer Output
-Edit `nodes/writer.py` to:
-- Change report structure
-- Adjust synthesis style
-- Modify citation format
-
-### 3. Add Custom Search Filters
-
-Modify `tools/search.py` to:
-- Filter by date ranges
-- Add domain restrictions
-- Customize result ranking
-
 ---
 
-## 🔧 Advanced Patterns
+## 🔧 Advanced Usage
 
-### 1. Streaming Results
+### 1. Evaluation System
+
+Run automated evaluation against golden dataset:
+
+```bash
+python run_eval.py
+```
+
+This will:
+- Load test cases from `tests/golden_dataset.json`
+- Run all queries in parallel (max 5 concurrent)
+- Use LLM-as-a-Judge to grade responses
+- Generate comprehensive report with accuracy metrics
+
+### 2. Streaming Results
 
 ```python
 async def stream_research(query: str):
@@ -143,7 +171,6 @@ async def stream_research(query: str):
     }
     
     async for chunk in app.astream(initial_state):
-        # Process intermediate states
         node_name = list(chunk.keys())[0]
         state = chunk[node_name]
         
@@ -157,7 +184,7 @@ async def stream_research(query: str):
             yield state["final_report"]
 ```
 
-### 2. Error Recovery & Retry
+### 3. Error Recovery & Retry
 
 ```python
 async def robust_research(query: str, max_retries: int = 3):
@@ -191,7 +218,7 @@ async def robust_research(query: str, max_retries: int = 3):
             await asyncio.sleep(2 ** attempt)  # Exponential backoff
 ```
 
-### 3. State Inspection & Debugging
+### 4. State Inspection & Debugging
 
 ```python
 async def debug_research(query: str):
@@ -221,6 +248,7 @@ async def debug_research(query: str):
             plan = node_state["research_plan"]
             print(f"Sub-queries: {plan.sub_queries}")
             print(f"Search terms: {plan.search_terms}")
+            print(f"Domains: {plan.domains}")
         
         if node_name == "researcher" and node_state.get("research_results"):
             results = node_state["research_results"]
@@ -246,105 +274,50 @@ async def debug_research(query: str):
 
 ## 🎨 Integration Patterns
 
-### 1. Web API Wrapper
+### 1. Web API Integration
+
+The production FastAPI service (`api.py`) is deployed on Google Cloud Run:
 
 ```python
-from fastapi import FastAPI
-from pydantic import BaseModel
+import requests
 
-app = FastAPI()
-
-class ResearchRequest(BaseModel):
-    query: str
-
-class ResearchResponse(BaseModel):
-    report: str
-    sources: list[str]
-    confidence: float
-
-@app.post("/research", response_model=ResearchResponse)
-async def research_endpoint(request: ResearchRequest):
-    from graph import create_graph
-    
-    graph = create_graph()
-    app_graph = graph.compile()
-    
-    state = {
-        "user_query": request.query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
-    
-    result = await app_graph.ainvoke(state)
-    
-    if result.get("error"):
-        raise HTTPException(status_code=500, detail=result["error"])
-    
-    report = result["final_report"]
-    return ResearchResponse(
-        report=report.content,
-        sources=report.sources,
-        confidence=report.confidence
+def research_via_api(query: str):
+    response = requests.post(
+        "https://research-agent-v2-69957378560.us-central1.run.app/research",
+        json={"query": query},
+        timeout=600  # 10 minutes
     )
+    return response.json()
 ```
 
-### 2. CLI Tool
+### 2. Batch Processing
 
 ```python
-# cli.py
-import argparse
-import asyncio
-from graph import create_graph
-
-async def main():
-    parser = argparse.ArgumentParser(description="The Oracle Research Agent")
-    parser.add_argument("query", help="Research query")
-    parser.add_argument("--output", "-o", help="Output file path")
-    parser.add_argument("--verbose", "-v", action="store_true")
-    
-    args = parser.parse_args()
-    
+async def batch_research(queries: list[str]):
     graph = create_graph()
     app = graph.compile()
     
-    state = {
-        "user_query": args.query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
-    
-    if args.verbose:
-        async for chunk in app.astream(state):
-            print(f"Processing: {list(chunk.keys())[0]}")
-    else:
+    results = []
+    for query in queries:
+        state = {
+            "user_query": query,
+            "research_plan": None,
+            "research_results": None,
+            "critique": None,
+            "final_report": None,
+            "current_node": "planner",
+            "iteration_count": 0,
+            "error": None,
+        }
         result = await app.ainvoke(state)
-        report = result["final_report"]
-        
-        if args.output:
-            with open(args.output, "w") as f:
-                f.write(report.content)
-            print(f"Report saved to {args.output}")
-        else:
-            print(report.content)
-
-if __name__ == "__main__":
-    asyncio.run(main())
+        results.append(result)
+    
+    return results
 ```
 
 ### 3. Scheduled Research Jobs
 
 ```python
-# scheduler.py
 import asyncio
 from datetime import datetime
 from graph import create_graph
@@ -383,124 +356,31 @@ async def scheduled_research(query: str, schedule_name: str):
 
 ---
 
-## 📊 Performance Optimization
+## 📊 Observability & Monitoring
 
-### 1. Parallel Sub-Query Processing
+### LangSmith Tracing
 
-Modify `nodes/researcher.py` to process sub-queries in parallel:
+1. **Enable tracing** in `.env`:
+   ```env
+   LANGCHAIN_TRACING_V2=true
+   LANGCHAIN_API_KEY=ls-...
+   LANGCHAIN_PROJECT=ResearchAgentv2
+   ```
 
-```python
-import asyncio
+2. **View traces**: When you run research, the system prints:
+   ```
+   🛠️  View Trace: https://smith.langchain.com/o/<org-id>/projects/p/ResearchAgentv2
+   ```
 
-# In researcher_node:
-all_results = await asyncio.gather(*[
-    search_tavily_with_retry(query=sq, max_results=5)
-    for sq in plan.sub_queries
-], return_exceptions=True)
+3. **Filter traces**: Use tags like `eval-run`, `eval-factual`, etc. for evaluation runs
 
-# Flatten and handle errors
-results = []
-for r in all_results:
-    if isinstance(r, Exception):
-        # Handle error
-        continue
-    results.extend(r)
-```
+### Structured Logging
 
-### 2. Cache Research Plans
-
-```python
-from functools import lru_cache
-import hashlib
-
-@lru_cache(maxsize=100)
-def get_cached_plan(query_hash: str):
-    # Cache logic here
-    pass
-
-# In planner_node:
-query_hash = hashlib.md5(query.encode()).hexdigest()
-if cached := get_cached_plan(query_hash):
-    return cached
-```
-
-### 3. Rate Limiting
-
-Add rate limiting to avoid API quota issues:
-
-```python
-from asyncio import Semaphore
-
-# In config.py or separate module
-search_semaphore = Semaphore(5)  # Max 5 concurrent searches
-
-# In search_tavily_with_retry:
-async with search_semaphore:
-    return await search_tavily(query, max_results)
-```
-
----
-
-## 🔍 Monitoring & Observability
-
-### 1. Track Execution Metrics
-
-```python
-import time
-from collections import defaultdict
-
-metrics = defaultdict(list)
-
-async def tracked_research(query: str):
-    start_time = time.time()
-    
-    graph = create_graph()
-    app = graph.compile()
-    
-    state = {
-        "user_query": query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
-    
-    async for chunk in app.astream(state):
-        node_name = list(chunk.keys())[0]
-        node_start = time.time()
-        # ... process ...
-        node_duration = time.time() - node_start
-        metrics[node_name].append(node_duration)
-    
-    total_time = time.time() - start_time
-    metrics["total"].append(total_time)
-    
-    return metrics
-```
-
-### 2. Export Traces
-
-The system already logs traces. To export them:
-
-```python
-import json
-import logging
-
-class JSONFileHandler(logging.Handler):
-    def __init__(self, filename):
-        super().__init__()
-        self.filename = filename
-    
-    def emit(self, record):
-        with open(self.filename, "a") as f:
-            f.write(record.getMessage() + "\n")
-
-# Add to utils/observability.py
-logger.addHandler(JSONFileHandler("traces.jsonl"))
-```
+All LLM calls are logged with:
+- Input prompts (PII redacted)
+- Output responses
+- Latency metrics
+- Error details
 
 ---
 
@@ -526,7 +406,6 @@ Always check for errors:
 ```python
 result = await app.ainvoke(state)
 if result.get("error"):
-    # Handle error appropriately
     raise Exception(f"Research failed: {result['error']}")
 ```
 
@@ -544,29 +423,63 @@ if result.get("error"):
 **Solution**: 
 - Process sub-queries in parallel
 - Reduce `max_results` in searches
-- Cache research plans
+- Cache research plans (Supabase)
 
 ### Issue: Quality Always Insufficient
 **Solution**: Lower `QUALITY_THRESHOLD` or improve search query quality
 
+### Issue: Frontend Timeout
+**Solution**: The API route has a 10-minute timeout. For longer research, increase `TIMEOUT_MS` in `research-client/app/api/research/route.ts`
+
 ---
 
-## 📈 Scaling Strategies
+## 📈 Deployment
 
-1. **Horizontal Scaling**: Run multiple instances with different queries
-2. **Queue System**: Use Celery/RQ for background processing
-3. **Database Storage**: Save reports and plans for reuse
-4. **API Gateway**: Rate limit and authenticate requests
+### Backend (Google Cloud Run)
+
+1. **Build Docker image**:
+   ```bash
+   docker build -f Dockerfile -t gcr.io/YOUR_PROJECT/research-agent:latest .
+   ```
+
+2. **Push to GCR**:
+   ```bash
+   docker push gcr.io/YOUR_PROJECT/research-agent:latest
+   ```
+
+3. **Deploy**:
+   ```bash
+   gcloud run deploy research-agent \
+     --image gcr.io/YOUR_PROJECT/research-agent:latest \
+     --platform managed \
+     --region us-central1 \
+     --set-env-vars TAVILY_API_KEY=xxx,ANTHROPIC_API_KEY=xxx \
+     --timeout 600 \
+     --memory 2Gi \
+     --cpu 2
+   ```
+
+### Frontend (Vercel)
+
+1. **Deploy to Vercel**:
+   ```bash
+   cd research-client
+   vercel deploy
+   ```
+
+2. **Set environment variable**:
+   - `NEXT_PUBLIC_BACKEND_URL`: Your Cloud Run URL
 
 ---
 
 ## 🎯 Pro Tips
 
-1. **Combine with other tools**: Use The Oracle for research, then feed results to other AI systems
-2. **Iterative refinement**: Use The Oracle's output as input for follow-up queries
+1. **Combine with other tools**: Use ResearchAgentv2 for research, then feed results to other AI systems
+2. **Iterative refinement**: Use the output as input for follow-up queries
 3. **Multi-angle research**: Run multiple queries on the same topic from different angles
 4. **Source verification**: Use the source URLs for manual verification when needed
 5. **Confidence scores**: Use `report.confidence` to gauge reliability
+6. **Evaluation**: Run `python run_eval.py` regularly to track system performance
 
 ---
 
@@ -596,6 +509,15 @@ reports = await batch_research(topics)
 # Combine and analyze reports
 ```
 
+### Evaluation Workflow
+```bash
+# Run evaluation suite
+python run_eval.py
+
+# Review results in terminal and LangSmith
+# Check accuracy, latency, and category breakdowns
+```
+
 ---
 
-The Oracle is designed to be a **self-correcting, quality-assured research system**. Leverage its recursive refinement and quality checks to get comprehensive, well-sourced research reports automatically.
+ResearchAgentv2 is designed to be a **self-correcting, quality-assured research system**. Leverage its recursive refinement and quality checks to get comprehensive, well-sourced research reports automatically.

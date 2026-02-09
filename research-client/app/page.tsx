@@ -181,10 +181,8 @@ export default function Home() {
               </div>
 
               {/* Report Content */}
-              <div className="prose prose-invert prose-green max-w-none">
-                <ReactMarkdown
-                  className="text-green-400 [&>*]:mb-4 [&>h1]:text-green-300 [&>h1]:text-2xl [&>h1]:font-bold [&>h2]:text-green-300 [&>h2]:text-xl [&>h2]:font-semibold [&>h3]:text-green-300 [&>h3]:text-lg [&>p]:leading-relaxed [&>ul]:list-disc [&>ul]:ml-6 [&>ol]:list-decimal [&>ol]:ml-6 [&>code]:bg-green-900 [&>code]:px-1 [&>code]:rounded [&>pre]:bg-green-900 [&>pre]:p-4 [&>pre]:rounded [&>pre]:overflow-x-auto [&>blockquote]:border-l-4 [&>blockquote]:border-green-500 [&>blockquote]:pl-4 [&>blockquote]:italic"
-                >
+              <div className="prose prose-invert prose-green max-w-none text-green-400 [&>*]:mb-4 [&>h1]:text-green-300 [&>h1]:text-2xl [&>h1]:font-bold [&>h2]:text-green-300 [&>h2]:text-xl [&>h2]:font-semibold [&>h3]:text-green-300 [&>h3]:text-lg [&>p]:leading-relaxed [&>ul]:list-disc [&>ul]:ml-6 [&>ol]:list-decimal [&>ol]:ml-6 [&>code]:bg-green-900 [&>code]:px-1 [&>code]:rounded [&>pre]:bg-green-900 [&>pre]:p-4 [&>pre]:rounded [&>pre]:overflow-x-auto [&>blockquote]:border-l-4 [&>blockquote]:border-green-500 [&>blockquote]:pl-4 [&>blockquote]:italic">
+                <ReactMarkdown>
                   {result.report}
                 </ReactMarkdown>
               </div>
