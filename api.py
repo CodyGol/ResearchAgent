@@ -177,13 +177,6 @@ async def research(request: ResearchRequest) -> ResearchResponse:
 
 if __name__ == "__main__":
     import uvicorn
-    
-    # Cloud Run sets PORT environment variable
+    import os
     port = int(os.environ.get("PORT", 8080))
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        timeout_keep_alive=600,  # 10 minutes for long-running research
-    )
+    uvicorn.run(app, host="0.0.0.0", port=port)
