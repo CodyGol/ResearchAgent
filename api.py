@@ -100,6 +100,7 @@ async def event_generator(query: str):
     Yields:
         NDJSON formatted events with type and content
     """
+    sent_done = False
     try:
         logger.info(f"Received query: {query}")
         
@@ -122,86 +123,95 @@ async def event_generator(query: str):
         # Configure LangSmith tracing
         run_config = create_run_config()
         
-        # Stream graph execution
-        final_state = None
-        async for event in app_instance.astream(initial_state, config=run_config):
-            # Get the node name from the event
-            node_name = list(event.keys())[0] if event else None
-            node_state = event[node_name] if node_name else {}
-            
-            # Yield status update
-            yield json.dumps({
-                "type": "log",
-                "content": f"Step completed: {node_name}",
-                "node": node_name
-            }) + "\n"
-            
-            # Check for final report
-            if node_state.get("final_report"):
-                report = node_state["final_report"]
-                critique = node_state.get("critique")
-                quality_score = critique.quality_score if critique else None
+        # Stream graph execution - wrap in try/except to handle disconnects gracefully
+        try:
+            final_state = None
+            async for event in app_instance.astream(initial_state, config=run_config):
+                # Get the node name from the event
+                node_name = list(event.keys())[0] if event else None
+                node_state = event[node_name] if node_name else {}
                 
-                # Convert Pydantic model to dict for JSON serialization
-                # Match ResearchResponse structure expected by frontend
-                report_dict = {
-                    "query": query,
-                    "report": report.content,  # Frontend expects result.report as string
-                    "sources": report.sources,
-                    "confidence": report.confidence,
-                    "iteration_count": node_state.get("iteration_count", 0),
-                    "quality_score": quality_score,
-                    "error": None,
-                }
-                
-                # Yield final result
+                # Yield status update
                 yield json.dumps({
-                    "type": "result",
-                    "report": report_dict
+                    "type": "log",
+                    "content": f"Step completed: {node_name}",
+                    "node": node_name
                 }) + "\n"
                 
-                final_state = node_state
-                break
+                # Check for final report
+                if node_state.get("final_report"):
+                    report = node_state["final_report"]
+                    critique = node_state.get("critique")
+                    quality_score = critique.quality_score if critique else None
+                    
+                    # Convert Pydantic model to dict for JSON serialization
+                    # Match ResearchResponse structure expected by frontend
+                    report_dict = {
+                        "query": query,
+                        "report": report.content,  # Frontend expects result.report as string
+                        "sources": report.sources,
+                        "confidence": report.confidence,
+                        "iteration_count": node_state.get("iteration_count", 0),
+                        "quality_score": quality_score,
+                        "error": None,
+                    }
+                    
+                    # Yield final result
+                    yield json.dumps({
+                        "type": "result",
+                        "report": report_dict
+                    }) + "\n"
+                    
+                    final_state = node_state
+                    break
+                
+                # Check for errors
+                if node_state.get("error"):
+                    error_msg = f"Research failed: {node_state['error']}"
+                    logger.error(error_msg)
+                    yield json.dumps({
+                        "type": "error",
+                        "error": error_msg
+                    }) + "\n"
+                    return
             
-            # Check for errors
-            if node_state.get("error"):
-                error_msg = f"Research failed: {node_state['error']}"
+            # Verify we got a report
+            if not final_state or not final_state.get("final_report"):
+                error_msg = "No report generated"
                 logger.error(error_msg)
                 yield json.dumps({
                     "type": "error",
                     "error": error_msg
                 }) + "\n"
-                return
-        
-        # Verify we got a report
-        if not final_state or not final_state.get("final_report"):
-            error_msg = "No report generated"
-            logger.error(error_msg)
-            yield json.dumps({
-                "type": "error",
-                "error": error_msg
-            }) + "\n"
-        else:
-            # Yield explicit completion signal
-            yield json.dumps({"type": "done"}) + "\n"
+            else:
+                # Yield explicit completion signal
+                yield json.dumps({"type": "done"}) + "\n"
+                sent_done = True
+                
+        except (GeneratorExit, Exception) as e:
+            # Handle the severed connection silently to allow LangGraph to finalize
+            logger.info(f"Streaming interrupted ({type(e).__name__}). Finalizing trace in background.")
+            # Note: We cannot 'yield' anymore if it's a GeneratorExit
+            return
             
-    except GeneratorExit:
-        # Handle graceful stream termination (client disconnect or completion)
-        logger.info("GeneratorExit caught: Client disconnected gracefully.")
-        return
     except Exception as e:
-        # Log full traceback for debugging
+        # Log full traceback for debugging (outer exception handler)
         error_trace = traceback.format_exc()
         logger.error(f"Unexpected error during research: {str(e)}\n{error_trace}")
         
-        # Yield error event
-        yield json.dumps({
-            "type": "error",
-            "error": f"Internal server error: {str(e)}"
-        }) + "\n"
+        # Only yield error if we haven't already sent done and it's not a GeneratorExit
+        if not sent_done and not isinstance(e, GeneratorExit):
+            try:
+                yield json.dumps({
+                    "type": "error",
+                    "error": f"Internal server error: {str(e)}"
+                }) + "\n"
+            except GeneratorExit:
+                # Can't yield on GeneratorExit, just return
+                return
     finally:
         # Ensure generator closes cleanly to finalize LangSmith trace
-        logger.info("LangGraph execution finalized.")
+        logger.info("LangGraph execution finalized. Check LangSmith for Green Checkmark.")
 
 
 @app.post("/research")
