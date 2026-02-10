@@ -22,6 +22,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [startTime, setStartTime] = useState<number | null>(null);
+  const [currentStep, setCurrentStep] = useState<string | null>(null);
   const animationFrameRef = useRef<number | null>(null);
 
   // Timer using requestAnimationFrame (prevents throttling when tab is backgrounded)
@@ -57,6 +58,7 @@ export default function Home() {
     setIsLoading(true);
     setError(null);
     setResult(null);
+    setCurrentStep(null);
     setElapsedTime(0);
     setStartTime(Date.now());
 
@@ -69,22 +71,86 @@ export default function Home() {
         body: JSON.stringify({ query }),
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(data.error || "Research request failed");
+        const errorText = await response.text();
+        throw new Error(errorText || "Research request failed");
       }
 
-      setResult(data);
-      // Calculate final duration before resetting
-      if (startTime) {
-        const finalDuration = (Date.now() - startTime) / 1000;
-        setElapsedTime(finalDuration);
+      // Handle NDJSON streaming
+      if (!response.body) {
+        throw new Error("Response body is null");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          // Process any remaining buffer
+          if (buffer.trim()) {
+            const lines = buffer.split("\n").filter((line) => line.trim());
+            for (const line of lines) {
+              try {
+                const data = JSON.parse(line);
+                if (data.type === "result") {
+                  setResult(data.report);
+                  if (startTime) {
+                    const finalDuration = (Date.now() - startTime) / 1000;
+                    setElapsedTime(finalDuration);
+                  }
+                } else if (data.type === "error") {
+                  throw new Error(data.error);
+                }
+              } catch (parseErr) {
+                // Skip invalid JSON lines
+                console.warn("Failed to parse line:", line, parseErr);
+              }
+            }
+          }
+          break;
+        }
+
+        // Decode chunk and add to buffer
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Process complete lines (ending with \n)
+        const lines = buffer.split("\n");
+        // Keep the last incomplete line in buffer
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          try {
+            const data = JSON.parse(line);
+
+            if (data.type === "log") {
+              // Update current step status
+              setCurrentStep(data.node || data.content);
+            } else if (data.type === "result") {
+              // Set final result and stop loading
+              setResult(data.report);
+              if (startTime) {
+                const finalDuration = (Date.now() - startTime) / 1000;
+                setElapsedTime(finalDuration);
+              }
+              setIsLoading(false);
+            } else if (data.type === "error") {
+              throw new Error(data.error);
+            }
+          } catch (parseErr) {
+            // Skip invalid JSON lines
+            console.warn("Failed to parse line:", line, parseErr);
+          }
+        }
       }
     } catch (err: any) {
       setError(err.message || "An unexpected error occurred");
-    } finally {
       setIsLoading(false);
+    } finally {
       setStartTime(null);
     }
   };
@@ -93,6 +159,7 @@ export default function Home() {
     setQuery("");
     setResult(null);
     setError(null);
+    setCurrentStep(null);
     setElapsedTime(0);
     setIsLoading(false);
     setStartTime(null);
@@ -137,7 +204,11 @@ export default function Home() {
               <span className="animate-pulse text-green-500">_</span>
             </div>
             <div className="text-green-600 text-sm">
-              Executing research agent... This may take several minutes.
+              {currentStep ? (
+                <>Step: <span className="text-green-400">{currentStep}</span></>
+              ) : (
+                "Executing research agent... This may take several minutes."
+              )}
             </div>
           </div>
         )}
