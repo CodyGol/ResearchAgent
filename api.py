@@ -185,6 +185,10 @@ async def event_generator(query: str):
             # Yield explicit completion signal
             yield json.dumps({"type": "done"}) + "\n"
             
+    except GeneratorExit:
+        # Handle graceful stream termination (client disconnect or completion)
+        logger.info("GeneratorExit caught: Client disconnected gracefully.")
+        return
     except Exception as e:
         # Log full traceback for debugging
         error_trace = traceback.format_exc()
@@ -197,7 +201,7 @@ async def event_generator(query: str):
         }) + "\n"
     finally:
         # Ensure generator closes cleanly to finalize LangSmith trace
-        logger.info("Generator closed. Finalizing LangSmith trace.")
+        logger.info("LangGraph execution finalized.")
 
 
 @app.post("/research")
