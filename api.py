@@ -6,6 +6,7 @@ import traceback
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,15 @@ app = FastAPI(
     title="ResearchAgentv2",
     description="Production research agent service",
     version="0.1.0",
+)
+
+# Enable CORS for frontend (e.g., Vercel deployment)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
