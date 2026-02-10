@@ -1,5 +1,7 @@
 """Production FastAPI service for ResearchAgentv2 on Google Cloud Run."""
 
+import asyncio
+import json
 import logging
 import os
 import traceback
@@ -7,7 +9,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from graph import create_graph, create_run_config
@@ -88,30 +90,26 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/research", response_model=ResearchResponse)
-async def research(request: ResearchRequest) -> ResearchResponse:
+async def event_generator(query: str):
     """
-    Execute a research query using the research agent.
+    Generate streaming events from the research agent execution.
     
     Args:
-        request: Research request with query
+        query: Research query string
         
-    Returns:
-        ResearchResponse with report, sources, and metadata
-        
-    Raises:
-        HTTPException: If research fails
+    Yields:
+        NDJSON formatted events with type and content
     """
-    logger.info(f"Received query: {request.query}")
-    
     try:
+        logger.info(f"Received query: {query}")
+        
         # Instantiate the graph
         graph = create_graph()
         app_instance = graph.compile()
         
         # Initialize state
         initial_state: AgentState = {
-            "user_query": request.query,
+            "user_query": query,
             "research_plan": None,
             "research_results": None,
             "critique": None,
@@ -124,55 +122,93 @@ async def research(request: ResearchRequest) -> ResearchResponse:
         # Configure LangSmith tracing
         run_config = create_run_config()
         
-        # Execute graph
-        final_state = await app_instance.ainvoke(initial_state, config=run_config)
+        # Stream graph execution
+        final_state = None
+        async for event in app_instance.astream(initial_state, config=run_config):
+            # Get the node name from the event
+            node_name = list(event.keys())[0] if event else None
+            node_state = event[node_name] if node_name else {}
+            
+            # Yield status update
+            yield json.dumps({
+                "type": "log",
+                "content": f"Step completed: {node_name}",
+                "node": node_name
+            }) + "\n"
+            
+            # Check for final report
+            if node_state.get("final_report"):
+                report = node_state["final_report"]
+                critique = node_state.get("critique")
+                quality_score = critique.quality_score if critique else None
+                
+                # Convert Pydantic model to dict for JSON serialization
+                # Match ResearchResponse structure expected by frontend
+                report_dict = {
+                    "query": query,
+                    "report": report.content,  # Frontend expects result.report as string
+                    "sources": report.sources,
+                    "confidence": report.confidence,
+                    "iteration_count": node_state.get("iteration_count", 0),
+                    "quality_score": quality_score,
+                    "error": None,
+                }
+                
+                # Yield final result
+                yield json.dumps({
+                    "type": "result",
+                    "report": report_dict
+                }) + "\n"
+                
+                final_state = node_state
+                break
+            
+            # Check for errors
+            if node_state.get("error"):
+                error_msg = f"Research failed: {node_state['error']}"
+                logger.error(error_msg)
+                yield json.dumps({
+                    "type": "error",
+                    "error": error_msg
+                }) + "\n"
+                return
         
-        # Check for errors in state
-        if final_state.get("error"):
-            error_msg = f"Research failed: {final_state['error']}"
-            logger.error(error_msg)
-            raise HTTPException(status_code=500, detail=error_msg)
-        
-        # Extract report
-        report = final_state.get("final_report")
-        if not report:
+        # Verify we got a report
+        if not final_state or not final_state.get("final_report"):
             error_msg = "No report generated"
             logger.error(error_msg)
-            raise HTTPException(status_code=500, detail=error_msg)
-        
-        # Extract quality score from critique if available
-        critique = final_state.get("critique")
-        quality_score = critique.quality_score if critique else None
-        
-        # Log completion
-        logger.info(
-            f"Research complete. Quality score: {quality_score}, "
-            f"Iterations: {final_state.get('iteration_count', 0)}"
-        )
-        
-        return ResearchResponse(
-            query=request.query,
-            report=report.content,
-            sources=report.sources,
-            confidence=report.confidence,
-            iteration_count=final_state.get("iteration_count", 0),
-            quality_score=quality_score,
-            error=None,
-        )
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
+            yield json.dumps({
+                "type": "error",
+                "error": error_msg
+            }) + "\n"
+            
     except Exception as e:
         # Log full traceback for debugging
         error_trace = traceback.format_exc()
         logger.error(f"Unexpected error during research: {str(e)}\n{error_trace}")
         
-        # Return 500 with error message
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}",
-        ) from e
+        # Yield error event
+        yield json.dumps({
+            "type": "error",
+            "error": f"Internal server error: {str(e)}"
+        }) + "\n"
+
+
+@app.post("/research")
+async def research(request: ResearchRequest):
+    """
+    Execute a research query using the research agent with streaming response.
+    
+    Args:
+        request: Research request with query
+        
+    Returns:
+        StreamingResponse with NDJSON events
+    """
+    return StreamingResponse(
+        event_generator(request.query),
+        media_type="application/x-ndjson"
+    )
 
 
 if __name__ == "__main__":
