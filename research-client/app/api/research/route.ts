@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// CRITICAL: Force the Edge Runtime for streaming
-export const runtime = "edge";
-
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "";
+// FIX: Use the variable names we actually set in Vercel
+const BACKEND_URL = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || "";
+const TIMEOUT_MS = 600000; // 10 minutes
 
 export async function POST(request: NextRequest) {
+  // Debug log to see what the server actually sees (check Vercel logs if this fails)
+  console.log("Connecting to Backend:", BACKEND_URL);
+
   if (!BACKEND_URL) {
     return NextResponse.json(
-      { error: "Backend URL not configured" },
+      { error: "Server Configuration Error: API_URL is missing." },
       { status: 500 }
     );
   }
@@ -17,42 +19,57 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { query } = body;
 
-    if (!query || typeof query !== "string") {
+    if (!query) {
       return NextResponse.json(
-        { error: "Query is required and must be a string" },
+        { error: "Query is required" },
         { status: 400 }
       );
     }
 
-    // Fetch from backend (streaming)
-    const response = await fetch(`${BACKEND_URL}/research`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ query }),
-    });
+    // Create AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    // Check response status
-    if (!response.ok) {
-      const errorText = await response.text();
-      return NextResponse.json(
-        { error: `Backend error: ${response.status} ${errorText}` },
-        { status: response.status }
-      );
+    try {
+      // Ensure we don't have double slashes if the URL ends with /
+      const cleanUrl = BACKEND_URL.replace(/\/$/, "");
+      const targetUrl = `${cleanUrl}/research`; 
+
+      console.log(`Forwarding request to: ${targetUrl}`);
+
+      const response = await fetch(targetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        // Try to parse the error from the backend
+        const errorText = await response.text();
+        console.error("Backend Error:", response.status, errorText);
+        return NextResponse.json(
+          { error: `Backend Error ${response.status}: ${errorText}` },
+          { status: response.status }
+        );
+      }
+
+      const data = await response.json();
+      return NextResponse.json(data);
+
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+      console.error("Fetch failed:", fetchError);
+      
+      if (fetchError.name === "AbortError") {
+        return NextResponse.json({ error: "Request timed out (10m limit)" }, { status: 504 });
+      }
+      return NextResponse.json({ error: `Connection Failed: ${fetchError.message}` }, { status: 502 });
     }
 
-    // CRITICAL: Pipe the stream directly - do NOT use await response.json()
-    return new NextResponse(response.body, {
-      headers: {
-        "Content-Type": "application/x-ndjson",
-      },
-    });
-
   } catch (error: any) {
-    return NextResponse.json(
-      { error: `Network error: ${error.message}` },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: `Invalid Request: ${error.message}` }, { status: 400 });
   }
 }
