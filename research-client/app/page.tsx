@@ -101,8 +101,12 @@ export default function Home() {
                     const finalDuration = (Date.now() - startTime) / 1000;
                     setElapsedTime(finalDuration);
                   }
+                  setIsLoading(false);
                 } else if (data.type === "error") {
                   throw new Error(data.error);
+                } else if (data.type === "done") {
+                  // Completion signal received
+                  setIsLoading(false);
                 }
               } catch (parseErr) {
                 // Skip invalid JSON lines
@@ -110,6 +114,8 @@ export default function Home() {
               }
             }
           }
+          // Ensure loading is stopped when stream ends
+          setIsLoading(false);
           break;
         }
 
@@ -140,6 +146,9 @@ export default function Home() {
               setIsLoading(false);
             } else if (data.type === "error") {
               throw new Error(data.error);
+            } else if (data.type === "done") {
+              // Explicit completion signal - break the loop
+              break;
             }
           } catch (parseErr) {
             // Skip invalid JSON lines

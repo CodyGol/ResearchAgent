@@ -181,6 +181,9 @@ async def event_generator(query: str):
                 "type": "error",
                 "error": error_msg
             }) + "\n"
+        else:
+            # Yield explicit completion signal
+            yield json.dumps({"type": "done"}) + "\n"
             
     except Exception as e:
         # Log full traceback for debugging
@@ -192,6 +195,9 @@ async def event_generator(query: str):
             "type": "error",
             "error": f"Internal server error: {str(e)}"
         }) + "\n"
+    finally:
+        # Ensure generator closes cleanly to finalize LangSmith trace
+        logger.info("Generator closed. Finalizing LangSmith trace.")
 
 
 @app.post("/research")
