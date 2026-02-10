@@ -124,75 +124,96 @@ async def event_generator(query: str):
         run_config = create_run_config()
         
         # Stream graph execution - wrap in try/except to handle disconnects gracefully
+        # Get the stream object first
+        stream = app_instance.astream(initial_state, config=run_config)
+        
+        # Track if client disconnected to prevent yielding after GeneratorExit
+        client_disconnected = False
+        
         try:
             final_state = None
-            async for event in app_instance.astream(initial_state, config=run_config):
-                # Get the node name from the event
-                node_name = list(event.keys())[0] if event else None
-                node_state = event[node_name] if node_name else {}
-                
-                # Yield status update
-                yield json.dumps({
-                    "type": "log",
-                    "content": f"Step completed: {node_name}",
-                    "node": node_name
-                }) + "\n"
-                
-                # Check for final report
-                if node_state.get("final_report"):
-                    report = node_state["final_report"]
-                    critique = node_state.get("critique")
-                    quality_score = critique.quality_score if critique else None
+            # Wrap async for loop to catch GeneratorExit and convert to StopAsyncIteration
+            try:
+                async for event in stream:
+                    # Get the node name from the event
+                    node_name = list(event.keys())[0] if event else None
+                    node_state = event[node_name] if node_name else {}
                     
-                    # Convert Pydantic model to dict for JSON serialization
-                    # Match ResearchResponse structure expected by frontend
-                    report_dict = {
-                        "query": query,
-                        "report": report.content,  # Frontend expects result.report as string
-                        "sources": report.sources,
-                        "confidence": report.confidence,
-                        "iteration_count": node_state.get("iteration_count", 0),
-                        "quality_score": quality_score,
-                        "error": None,
-                    }
-                    
-                    # Yield final result
+                    # Yield status update
                     yield json.dumps({
-                        "type": "result",
-                        "report": report_dict
+                        "type": "log",
+                        "content": f"Step completed: {node_name}",
+                        "node": node_name
                     }) + "\n"
                     
-                    final_state = node_state
-                    break
+                    # Check for final report
+                    if node_state.get("final_report"):
+                        report = node_state["final_report"]
+                        critique = node_state.get("critique")
+                        quality_score = critique.quality_score if critique else None
+                        
+                        # Convert Pydantic model to dict for JSON serialization
+                        # Match ResearchResponse structure expected by frontend
+                        report_dict = {
+                            "query": query,
+                            "report": report.content,  # Frontend expects result.report as string
+                            "sources": report.sources,
+                            "confidence": report.confidence,
+                            "iteration_count": node_state.get("iteration_count", 0),
+                            "quality_score": quality_score,
+                            "error": None,
+                        }
+                        
+                        # Yield final result
+                        yield json.dumps({
+                            "type": "result",
+                            "report": report_dict
+                        }) + "\n"
+                        
+                        final_state = node_state
+                        break
+                    
+                    # Check for errors
+                    if node_state.get("error"):
+                        error_msg = f"Research failed: {node_state['error']}"
+                        logger.error(error_msg)
+                        yield json.dumps({
+                            "type": "error",
+                            "error": error_msg
+                        }) + "\n"
+                        return
+                        
+            except GeneratorExit:
+                # Convert GeneratorExit to StopAsyncIteration to prevent propagation to LangGraph
+                # This allows LangGraph's generator to handle it gracefully and finalize the trace
+                logger.info("Client disconnected during stream. Converting GeneratorExit to StopAsyncIteration for graceful LangGraph finalization.")
+                client_disconnected = True
+                raise StopAsyncIteration  # This won't propagate to LangGraph's generator
                 
-                # Check for errors
-                if node_state.get("error"):
-                    error_msg = f"Research failed: {node_state['error']}"
-                    logger.error(error_msg)
+        except StopAsyncIteration:
+            # Normal completion or converted GeneratorExit - LangGraph handles this gracefully
+            pass
+        except Exception as e:
+            # Handle other exceptions during streaming
+            logger.error(f"Streaming error: {type(e).__name__}: {str(e)}")
+            # Re-raise to be caught by outer handler if needed
+            raise
+        
+        # Verify we got a report (only if client didn't disconnect and we didn't exit early)
+        if not client_disconnected:
+            if not final_state or not final_state.get("final_report"):
+                error_msg = "No report generated"
+                logger.error(error_msg)
+                if not sent_done:
                     yield json.dumps({
                         "type": "error",
                         "error": error_msg
                     }) + "\n"
-                    return
-            
-            # Verify we got a report
-            if not final_state or not final_state.get("final_report"):
-                error_msg = "No report generated"
-                logger.error(error_msg)
-                yield json.dumps({
-                    "type": "error",
-                    "error": error_msg
-                }) + "\n"
             else:
                 # Yield explicit completion signal
-                yield json.dumps({"type": "done"}) + "\n"
-                sent_done = True
-                
-        except (GeneratorExit, Exception) as e:
-            # Handle the severed connection silently to allow LangGraph to finalize
-            logger.info(f"Streaming interrupted ({type(e).__name__}). Finalizing trace in background.")
-            # Note: We cannot 'yield' anymore if it's a GeneratorExit
-            return
+                if not sent_done:
+                    yield json.dumps({"type": "done"}) + "\n"
+                    sent_done = True
             
     except Exception as e:
         # Log full traceback for debugging (outer exception handler)
