@@ -154,6 +154,27 @@ Run `python fix_env.py` to diagnose and fix issues.
 
 The full `supabase` package doesn't work on Python 3.14. The system automatically uses `postgrest` (which you already have) - no action needed!
 
+## Production Deployment
+
+### Backend (FastAPI on Cloud Run)
+
+The production backend (`api.py`) uses:
+- **Streaming architecture**: NDJSON event streaming for real-time progress
+- **Queue-based shielding**: LangGraph runs in background task, isolated from HTTP stream
+- **Health checks**: `/health` endpoint for Cloud Run probes
+- **CORS enabled**: Allows frontend integration
+
+See [README.md](README.md) and [docs/architecture.md](docs/architecture.md) for deployment details.
+
+### Frontend (Next.js)
+
+The frontend (`research-client/`) uses:
+- **Edge runtime**: Optimized for streaming responses
+- **NDJSON parsing**: Line-by-line event processing
+- **Real-time updates**: UI updates as events stream in
+
+See [research-client/SETUP.md](research-client/SETUP.md) for frontend setup.
+
 ## Security
 
 ⚠️ **Important**: The `.env` file is in `.gitignore`. Never commit API keys to git!

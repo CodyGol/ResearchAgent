@@ -29,8 +29,10 @@ graph TB
     end
     
     UI -->|POST /api/research| API_Route
-    API_Route -->|Proxy with 10min timeout| FastAPI
-    FastAPI -->|POST /research| LangGraph
+    API_Route -->|Streams NDJSON| FastAPI
+    FastAPI -->|POST /research<br/>StreamingResponse| EventGen[Event Generator<br/>Queue-Based Shield]
+    EventGen -->|Background Task| LangGraph
+    EventGen -->|NDJSON Stream| FastAPI
     
     LangGraph --> Planner
     Planner -->|Uses| Claude
@@ -46,9 +48,9 @@ graph TB
     Writer -->|Saves| Supabase
     Writer -->|Traces| LangSmith
     
-    LangGraph -->|Returns Report| FastAPI
-    FastAPI -->|JSON Response| API_Route
-    API_Route -->|Streams Result| UI
+    LangGraph -->|Queue Output| EventGen
+    FastAPI -->|NDJSON Events| API_Route
+    API_Route -->|Streams NDJSON| UI
     
     style UI fill:#e1f5ff
     style FastAPI fill:#fff4e1
@@ -95,11 +97,13 @@ graph TD
 - **File**: `api.py`
 - **Deployment**: Google Cloud Run
 - **Features**:
-  - Health check endpoint (`/health`)
-  - Research endpoint (`/research`)
-  - 10-minute timeout support
-  - Structured error handling
-  - LangSmith tracing integration
+  - Health check endpoint (`/health`) for Cloud Run probes
+  - Streaming research endpoint (`/research`) with NDJSON format
+  - **Queue-based event generator**: Shields LangGraph from client disconnects
+  - CORS enabled for frontend integration
+  - 10-minute timeout support (configurable)
+  - Structured error handling with full tracebacks
+  - LangSmith tracing integration (always finalizes)
 
 ### Agent Nodes
 
@@ -158,10 +162,53 @@ graph TD
 
 ## Data Flow
 
-1. User submits query via Next.js UI
-2. Frontend API route proxies to FastAPI backend (with 10min timeout)
-3. FastAPI instantiates LangGraph and executes agent
-4. Agent nodes execute sequentially with recursive refinement
-5. Final report returned to FastAPI
-6. FastAPI returns JSON response
-7. Frontend displays result with fade-in animation
+1. **User submits query** via Next.js UI
+2. **Frontend API route** (Edge runtime) proxies to FastAPI backend
+3. **FastAPI** creates `event_generator` with queue-based architecture:
+   - Starts LangGraph in background task (`asyncio.create_task`)
+   - LangGraph outputs are queued (`asyncio.Queue`)
+   - Main generator reads from queue and yields NDJSON events
+4. **Agent nodes execute** sequentially with recursive refinement:
+   - Planner → Researcher → Critic → (loop if needed) → Writer
+5. **Events streamed** as NDJSON:
+   - `{"type": "log", "content": "...", "node": "planner"}\n`
+   - `{"type": "result", "report": {...}}\n`
+   - `{"type": "done"}\n`
+6. **Frontend parses** NDJSON line-by-line and updates UI in real-time
+7. **Result displayed** with fade-in animation
+
+## Streaming Architecture
+
+### Queue-Based Event Generator
+
+The `event_generator` in `api.py` uses a **queue-based architecture** to decouple LangGraph from the HTTP stream:
+
+```python
+# LangGraph runs in background task (cannot be killed by disconnect)
+graph_task = asyncio.create_task(run_graph())
+
+# Main generator reads from queue (isolated from LangGraph)
+while True:
+    item = await queue.get()
+    # Yield NDJSON events to client
+```
+
+**Benefits**:
+- **GeneratorExit isolation**: Client disconnects never reach LangGraph's generator
+- **Guaranteed completion**: LangGraph always finishes, even if client disconnects
+- **LangSmith compatibility**: Traces always finalize (green checkmark)
+- **Real-time progress**: Client sees updates as nodes execute
+
+### NDJSON Event Format
+
+- **`log`**: Progress updates (`{"type": "log", "content": "...", "node": "planner"}`)
+- **`result`**: Final report (`{"type": "result", "report": {...}}`)
+- **`error`**: Error messages (`{"type": "error", "error": "..."}`)
+- **`done`**: Completion signal (`{"type": "done"}`)
+
+### Frontend Streaming
+
+- **Edge Runtime**: Next.js API route uses `export const runtime = "edge"`
+- **Stream Piping**: Directly pipes backend response body to frontend
+- **Line-by-line parsing**: Uses `TextDecoder` and `ReadableStream` reader
+- **Real-time updates**: Updates UI state as events arrive

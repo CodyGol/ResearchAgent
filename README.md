@@ -26,13 +26,18 @@ A production-grade recursive deep-research agent system with a Generative UI fro
 python run_research.py "Your research query here"
 ```
 
-### Option 3: REST API
+### Option 3: REST API (Streaming)
+
+The API uses **NDJSON streaming** for real-time progress:
 
 ```bash
 curl -X POST https://research-agent-v2-69957378560.us-central1.run.app/research \
   -H "Content-Type: application/json" \
-  -d '{"query": "What are the latest developments in quantum computing?"}'
+  -d '{"query": "What are the latest developments in quantum computing?"}' \
+  --no-buffer
 ```
+
+**Response**: Streams NDJSON events (`log`, `result`, `done`) for real-time updates.
 
 ## Architecture
 
@@ -46,10 +51,11 @@ ResearchAgentv2 uses a LangGraph state machine with four core nodes:
 The Critic node implements a recursive loop: if quality is insufficient, it routes back to Researcher for refinement (up to `MAX_RESEARCH_ITERATIONS`).
 
 **System Components:**
-- **Backend**: FastAPI service (`api.py`) deployed on Google Cloud Run
-- **Frontend**: Next.js Generative UI (`research-client/`) with terminal-style interface
+- **Backend**: FastAPI service (`api.py`) with queue-based streaming, deployed on Google Cloud Run
+- **Frontend**: Next.js Generative UI (`research-client/`) with Edge runtime and NDJSON streaming
 - **Agent**: LangGraph state machine with recursive refinement
-- **Observability**: LangSmith tracing and structured logging
+- **Streaming**: NDJSON event stream with shielded event generator (prevents GeneratorExit)
+- **Observability**: LangSmith tracing (always finalizes) and structured logging
 - **Evaluation**: Automated testing with LLM-as-a-Judge (`run_eval.py`)
 
 See [docs/architecture.md](docs/architecture.md) for the full architecture diagram.
@@ -220,10 +226,11 @@ See [USAGE_GUIDE.md](USAGE_GUIDE.md) for comprehensive usage examples, integrati
 - ✅ **Error Handling**: Retryable vs Fatal error categorization
 
 ### Production Features
-- ✅ **FastAPI Service**: Production-ready API with health checks
-- ✅ **Docker Support**: Optimized container for Cloud Run
-- ✅ **Next.js Frontend**: Generative UI with non-blocking requests
-- ✅ **LangSmith Tracing**: Full observability of agent execution
+- ✅ **FastAPI Service**: Production-ready API with health checks and CORS
+- ✅ **Streaming Architecture**: NDJSON event streaming with queue-based shielding
+- ✅ **Docker Support**: Optimized container for Cloud Run (Python 3.12-slim)
+- ✅ **Next.js Frontend**: Generative UI with Edge runtime and streaming support
+- ✅ **LangSmith Tracing**: Full observability with guaranteed trace finalization
 - ✅ **Supabase Integration**: Caching and persistence
 - ✅ **Evaluation System**: Automated testing with LLM-as-a-Judge
 
@@ -257,7 +264,7 @@ See [USAGE_GUIDE.md](USAGE_GUIDE.md) for comprehensive usage examples, integrati
 
 ```bash
 # Build and push
-docker build -f Dockerfile -t gcr.io/YOUR_PROJECT/research-agent:latest .
+docker build -t gcr.io/YOUR_PROJECT/research-agent:latest .
 docker push gcr.io/YOUR_PROJECT/research-agent:latest
 
 # Deploy
@@ -268,8 +275,11 @@ gcloud run deploy research-agent \
   --set-env-vars TAVILY_API_KEY=xxx,ANTHROPIC_API_KEY=xxx \
   --timeout 600 \
   --memory 2Gi \
-  --cpu 2
+  --cpu 2 \
+  --allow-unauthenticated
 ```
+
+**Health Check**: `/health` endpoint returns `{"status": "ok"}` for Cloud Run probes.
 
 ### Frontend (Vercel)
 

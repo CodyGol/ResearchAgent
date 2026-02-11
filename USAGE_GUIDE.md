@@ -67,12 +67,45 @@ report = asyncio.run(research("Latest AI safety research"))
 print(report.content)
 ```
 
-### Option 4: REST API
+### Option 4: REST API (Streaming)
+
+The API uses **NDJSON streaming** for real-time progress updates:
 
 ```bash
 curl -X POST https://research-agent-v2-69957378560.us-central1.run.app/research \
   -H "Content-Type: application/json" \
-  -d '{"query": "What are the latest developments in quantum computing?"}'
+  -d '{"query": "What are the latest developments in quantum computing?"}' \
+  --no-buffer
+```
+
+**Response Format (NDJSON)**:
+- `{"type": "log", "content": "Step completed: planner", "node": "planner"}\n`
+- `{"type": "log", "content": "Step completed: researcher", "node": "researcher"}\n`
+- `{"type": "result", "report": {...}}\n`
+- `{"type": "done"}\n`
+
+**Python Streaming Client**:
+```python
+import requests
+import json
+
+def stream_research(query: str):
+    response = requests.post(
+        "https://research-agent-v2-69957378560.us-central1.run.app/research",
+        json={"query": query},
+        stream=True,
+        timeout=600
+    )
+    
+    for line in response.iter_lines():
+        if line:
+            event = json.loads(line)
+            if event["type"] == "log":
+                print(f"Status: {event['content']}")
+            elif event["type"] == "result":
+                return event["report"]
+            elif event["type"] == "error":
+                raise Exception(event["error"])
 ```
 
 ---
@@ -152,7 +185,9 @@ This will:
 - Use LLM-as-a-Judge to grade responses
 - Generate comprehensive report with accuracy metrics
 
-### 2. Streaming Results
+### 2. Streaming Results (Direct LangGraph)
+
+For direct LangGraph streaming (bypassing the API):
 
 ```python
 async def stream_research(query: str):
@@ -170,7 +205,9 @@ async def stream_research(query: str):
         "error": None,
     }
     
-    async for chunk in app.astream(initial_state):
+    run_config = create_run_config()  # For LangSmith tracing
+    
+    async for chunk in app.astream(initial_state, config=run_config):
         node_name = list(chunk.keys())[0]
         state = chunk[node_name]
         
@@ -183,6 +220,8 @@ async def stream_research(query: str):
         if "final_report" in state and state["final_report"]:
             yield state["final_report"]
 ```
+
+**Note**: The production API (`api.py`) uses a **queue-based event generator** that shields LangGraph from client disconnects, ensuring LangSmith traces always finalize properly.
 
 ### 3. Error Recovery & Retry
 
@@ -274,21 +313,43 @@ async def debug_research(query: str):
 
 ## 🎨 Integration Patterns
 
-### 1. Web API Integration
+### 1. Web API Integration (Streaming)
 
-The production FastAPI service (`api.py`) is deployed on Google Cloud Run:
+The production FastAPI service (`api.py`) uses **NDJSON streaming** for real-time updates:
 
 ```python
 import requests
+import json
 
 def research_via_api(query: str):
+    """Stream research results from the API."""
     response = requests.post(
         "https://research-agent-v2-69957378560.us-central1.run.app/research",
         json={"query": query},
+        stream=True,
         timeout=600  # 10 minutes
     )
-    return response.json()
+    
+    for line in response.iter_lines():
+        if line:
+            event = json.loads(line)
+            if event["type"] == "log":
+                print(f"Progress: {event['content']}")
+            elif event["type"] == "result":
+                return event["report"]
+            elif event["type"] == "error":
+                raise Exception(event["error"])
+            elif event["type"] == "done":
+                break
+    
+    return None
 ```
+
+**Key Features**:
+- **Queue-based shielding**: LangGraph runs in a background task, isolated from HTTP stream
+- **Graceful disconnects**: Client disconnects don't interrupt LangGraph execution
+- **LangSmith compatibility**: Traces always finalize (green checkmark)
+- **Real-time progress**: `log` events show current node execution
 
 ### 2. Batch Processing
 
@@ -429,7 +490,10 @@ if result.get("error"):
 **Solution**: Lower `QUALITY_THRESHOLD` or improve search query quality
 
 ### Issue: Frontend Timeout
-**Solution**: The API route has a 10-minute timeout. For longer research, increase `TIMEOUT_MS` in `research-client/app/api/research/route.ts`
+**Solution**: The API uses streaming (NDJSON) which prevents timeouts. The frontend Edge runtime supports long-running streams. If you need longer than 10 minutes, increase Cloud Run timeout: `--timeout 1200` (20 minutes)
+
+### Issue: LangSmith Traces Stay "Pending"
+**Solution**: The queue-based event generator ensures LangGraph always completes even if the client disconnects. Traces will finalize automatically. Check logs for "LangGraph internal stream finished."
 
 ---
 
@@ -439,7 +503,7 @@ if result.get("error"):
 
 1. **Build Docker image**:
    ```bash
-   docker build -f Dockerfile -t gcr.io/YOUR_PROJECT/research-agent:latest .
+   docker build -t gcr.io/YOUR_PROJECT/research-agent:latest .
    ```
 
 2. **Push to GCR**:
@@ -456,8 +520,15 @@ if result.get("error"):
      --set-env-vars TAVILY_API_KEY=xxx,ANTHROPIC_API_KEY=xxx \
      --timeout 600 \
      --memory 2Gi \
-     --cpu 2
+     --cpu 2 \
+     --allow-unauthenticated
    ```
+
+**Health Check**: The service exposes `/health` endpoint for Cloud Run probes:
+```bash
+curl https://your-service.run.app/health
+# Returns: {"status": "ok"}
+```
 
 ### Frontend (Vercel)
 
