@@ -1,9 +1,23 @@
 # Supabase Integration
 
-The Oracle uses Supabase for:
-1. **Research Plan Caching** - Avoid redundant LLM calls for similar queries
-2. **Report Persistence** - Store all research reports for later retrieval
-3. **Analytics** - Track search results and research patterns
+The Oracle uses Supabase for persistence and (optionally) research-plan caching.
+
+## What Is Persisted
+
+| Layer | Tables | When |
+|-------|--------|------|
+| Plan cache | `research_plans` | Planner (if `ENABLE_CACHING=true`) |
+| Research run | `research_runs` | Start/finalize via `services/research_run_service.py` |
+| Sources | `sources` | Researcher / fast path |
+| Evidence | `evidence` | Evidence extractor |
+| Claims | `claims` | Claim extractor |
+| Claim–evidence links | `claim_evidence` | Claim extractor + claim verifier |
+| Verifications | `verifications` | Claim verifier; `knowledge_category` backfilled by Knowledge State node |
+| Reports | `research_reports` | Writer (optional `research_run_id` link) |
+
+Legacy analytics table: `search_results` (from `schema.sql`).
+
+**There is no full caching system** for evidence or claims. `ENABLE_CACHING` applies to research plans only.
 
 ## Setup
 
@@ -11,137 +25,107 @@ The Oracle uses Supabase for:
 
 1. Go to https://supabase.com/
 2. Create a new project
-3. Note your project URL and API key
+3. Note your project URL and service role key
 
 ### 2. Configure Environment
 
-Add to your `.env` file:
-
 ```env
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_KEY=your-anon-or-service-role-key
+SUPABASE_KEY=your-service-role-key
 ENABLE_CACHING=true
 CACHE_TTL_HOURS=24
 ```
 
+Use the **Service Role Key** for backend services (bypasses RLS).
+
 ### 3. Create Database Schema
 
-1. Open Supabase Dashboard → SQL Editor
-2. Run the SQL from `schema.sql`:
-   ```bash
-   cat db/schema.sql
-   ```
-3. Copy and paste into SQL Editor, then execute
+Run both scripts in Supabase SQL Editor:
+
+1. `db/schema.sql` — plan cache, reports, search_results
+2. `db/migrations/001_evidence_foundation.sql` — evidence-backed intelligence tables
 
 ### 4. Install Dependencies
 
 ```bash
-pip install supabase postgrest
-# or
 uv sync
 ```
 
-## Usage
+## Repositories
 
-### Automatic Integration
+| Module | Purpose |
+|--------|---------|
+| `db/repository.py` | Plan cache, report storage (legacy) |
+| `db/evidence_repositories.py` | Research runs, sources, evidence, claims, verifications |
+| `db/client.py` | Supabase/postgrest client |
 
-The system automatically:
-- **Caches research plans** in the planner node (if `ENABLE_CACHING=true`)
-- **Saves all reports** to the database in the writer node
+Persistence is skipped when `SUPABASE_URL` / `SUPABASE_KEY` are unset; the agent uses in-memory negative IDs.
 
-### Manual Usage
+## Knowledge State Persistence
+
+Phase 2D writes:
+
+- `verifications.knowledge_category` — `known`, `likely`, `disputed`, or `unknown` (null for contradicted/unverifiable)
+- `research_runs.metadata` — compact `knowledge_state` snapshot at finalize (IDs and metrics only)
+
+## Manual Usage (Legacy Reports)
 
 ```python
 from db.repository import plan_repo, report_repo
 
-# Check cache
 cached_plan = await plan_repo.get_cached_plan("your query")
-if cached_plan:
-    print("Found cached plan!")
-
-# Save report
 report_id = await report_repo.save_report(
     query="Your query",
     report=final_report,
     quality_score=0.85,
-    iteration_count=2
+    iteration_count=2,
 )
-
-# Retrieve report
-report = await report_repo.get_report(report_id)
-
-# List recent reports
-reports = await report_repo.list_reports(limit=10)
 ```
+
+For evidence-backed runs, prefer repositories in `db/evidence_repositories.py`.
 
 ## Configuration
 
-### Cache Settings
-
-- `ENABLE_CACHING`: Enable/disable plan caching (default: `true`)
-- `CACHE_TTL_HOURS`: How long to cache plans (default: `24`)
-
-### API Key Type
-
-- **Anon Key**: Public, limited by RLS policies
-- **Service Role Key**: Full access, bypasses RLS (use for backend)
-
-For The Oracle, use **Service Role Key** since it's a backend service.
+- `ENABLE_CACHING`: Plan cache only (default: `true` when Supabase configured)
+- `CACHE_TTL_HOURS`: Plan cache TTL (default: `24`)
 
 ## Security
 
-The schema includes Row Level Security (RLS). Adjust policies in `schema.sql` based on your needs:
-
-- **Public access**: Current policies allow all (for service role)
-- **Authenticated users**: Modify policies to check `auth.uid()`
-- **Read-only**: Create separate read policies
+Row Level Security is enabled on evidence tables. Service role policies allow backend access. Adjust in migration SQL for production auth models.
 
 ## Maintenance
 
-### Cleanup Expired Cache
-
-The schema includes a cleanup function. Run manually:
+### Cleanup Expired Plan Cache
 
 ```sql
 SELECT cleanup_expired_plans();
 ```
 
-Or schedule with pg_cron (if enabled):
+### Query Recent Runs
 
 ```sql
-SELECT cron.schedule('cleanup-expired-plans', '0 2 * * *', 'SELECT cleanup_expired_plans()');
+SELECT id, query, status, metadata->'knowledge_state_metrics' AS ks_metrics, created_at
+FROM research_runs
+ORDER BY created_at DESC
+LIMIT 10;
 ```
 
-### Query Reports
+### Query Verifications by Category
 
 ```sql
--- Recent reports
-SELECT id, query, confidence, created_at 
-FROM research_reports 
-ORDER BY created_at DESC 
-LIMIT 10;
-
--- Reports by quality
-SELECT * FROM research_reports 
-WHERE quality_score >= 0.8 
-ORDER BY created_at DESC;
-
--- Cache hit rate (if tracking)
-SELECT COUNT(*) as total, 
-       COUNT(CASE WHEN expires_at > NOW() THEN 1 END) as active
-FROM research_plans;
+SELECT c.text, v.status, v.knowledge_category, v.confidence
+FROM verifications v
+JOIN claims c ON c.id = v.claim_id
+WHERE v.research_run_id = :run_id;
 ```
 
 ## Troubleshooting
 
-### "Table does not exist"
-- Run the schema SQL in Supabase SQL Editor
+| Issue | Fix |
+|-------|-----|
+| Table does not exist | Run both `schema.sql` and `001_evidence_foundation.sql` |
+| Permission denied | Use service role key; check RLS policies |
+| Cache not working | `ENABLE_CACHING=true`; verify `research_plans` exists |
+| Verifications not saved | Check `SUPABASE_*` env vars; see logs for persistence warnings |
 
-### "Permission denied"
-- Check RLS policies
-- Use service role key instead of anon key
-
-### "Cache not working"
-- Check `ENABLE_CACHING=true` in `.env`
-- Verify table exists and has correct structure
-- Check Supabase logs for errors
+See [docs/architecture.md](../docs/architecture.md) for the full data model.

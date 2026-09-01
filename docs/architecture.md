@@ -1,214 +1,263 @@
-# ResearchAgentv2 - System Architecture
+# ResearchAgentv2 — System Architecture (Phase 2D)
 
-## High-Level Architecture
+This document describes the **implemented** architecture through Phase 2D (Knowledge State). Items in [docs/roadmap.md](roadmap.md) are not implemented unless explicitly marked here.
+
+## High-Level System
 
 ```mermaid
 graph TB
-    subgraph "Frontend Layer"
-        UI[Next.js Generative UI<br/>Deep Research Console]
-        API_Route[API Route<br/>/api/research]
+    subgraph Frontend
+        UI[Next.js Deep Research Console]
+        APIRoute[/api/research Edge proxy]
     end
-    
-    subgraph "Backend Layer"
-        FastAPI[FastAPI Service<br/>api.py]
-        LangGraph[LangGraph State Machine]
+
+    subgraph Backend
+        FastAPI[api.py — NDJSON streaming]
+        Graph[LangGraph StateGraph — graph.py]
     end
-    
-    subgraph "Agent Nodes"
-        Planner[Planner Node<br/>Research Plan Generation]
-        Researcher[Researcher Node<br/>Tavily Search]
-        Critic[Critic Node<br/>Quality Evaluation]
-        Writer[Writer Node<br/>Report Synthesis]
+
+    subgraph External
+        Claude[Anthropic Claude]
+        Tavily[Tavily Search]
+        LangSmith[LangSmith Tracing]
+        Supabase[Supabase PostgreSQL]
     end
-    
-    subgraph "External Services"
-        Claude[Anthropic Claude 4.5<br/>LLM Provider]
-        Tavily[Tavily API<br/>Web Search]
-        LangSmith[LangSmith<br/>Observability]
-        Supabase[Supabase<br/>Caching & Persistence]
-    end
-    
-    UI -->|POST /api/research| API_Route
-    API_Route -->|Streams NDJSON| FastAPI
-    FastAPI -->|POST /research<br/>StreamingResponse| EventGen[Event Generator<br/>Queue-Based Shield]
-    EventGen -->|Background Task| LangGraph
-    EventGen -->|NDJSON Stream| FastAPI
-    
-    LangGraph --> Planner
-    Planner -->|Uses| Claude
-    Planner -->|Caches| Supabase
-    Planner --> Researcher
-    Researcher -->|Searches| Tavily
-    Researcher --> Critic
-    Critic -->|Evaluates with| Claude
-    Critic -->|Quality Check| Decision{Quality<br/>Sufficient?}
-    Decision -->|No - Retry| Researcher
-    Decision -->|Yes| Writer
-    Writer -->|Synthesizes with| Claude
-    Writer -->|Saves| Supabase
-    Writer -->|Traces| LangSmith
-    
-    LangGraph -->|Queue Output| EventGen
-    FastAPI -->|NDJSON Events| API_Route
-    API_Route -->|Streams NDJSON| UI
-    
-    style UI fill:#e1f5ff
-    style FastAPI fill:#fff4e1
-    style Planner fill:#e1f5ff
-    style Researcher fill:#fff4e1
-    style Critic fill:#ffe1f5
-    style Writer fill:#e1ffe1
-    style Decision fill:#f0f0f0
-    style LangSmith fill:#f5e1ff
+
+    UI --> APIRoute --> FastAPI --> Graph
+    Graph --> Claude
+    Graph --> Tavily
+    Graph --> LangSmith
+    Graph --> Supabase
 ```
 
-## Agent State Machine Flow
+## Agent Graph (Implemented)
 
 ```mermaid
-graph TD
-    Start([User Query]) --> Planner[Planner Node]
-    Planner --> |Research Plan| Researcher[Researcher Node]
-    Researcher --> |Search Results| Critic[Critic Node]
-    Critic --> |Quality Check| Decision{Quality<br/>Sufficient?}
-    Decision -->|No - Retry| Researcher
-    Decision -->|Yes| Writer[Writer Node]
-    Writer --> |Final Report| End([Output])
-    
-    style Planner fill:#e1f5ff
-    style Researcher fill:#fff4e1
-    style Critic fill:#ffe1f5
-    style Writer fill:#e1ffe1
-    style Decision fill:#f0f0f0
+flowchart TD
+    START([User Query]) --> ROUTER[Router]
+
+    ROUTER -->|SIMPLE_FACT| FAST[Fast Path]
+    ROUTER -->|STANDARD / DEEP| PLANNER[Planner]
+
+    FAST -->|success| END1([END])
+    FAST -->|escalate| PLANNER
+
+    PLANNER --> RESEARCHER[Researcher]
+    RESEARCHER --> EVIDENCE[Evidence Extractor]
+    EVIDENCE --> CLAIMS[Claim Extractor]
+    CLAIMS --> VERIFIER[Claim Verifier]
+    VERIFIER --> CRITIC[Critic]
+
+    CRITIC -->|insufficient and under iteration budget| RESEARCHER
+    CRITIC -->|sufficient or max iterations| KS[Knowledge State]
+    KS --> WRITER[Writer]
+    WRITER --> END2([END])
 ```
 
-## Component Details
+### Route: SIMPLE_FACT (frozen)
 
-### Frontend (Next.js)
-- **Location**: `research-client/`
-- **UI**: Terminal-style interface (black background, green monospace)
-- **Features**:
-  - Non-blocking long-running requests (up to 10 minutes)
-  - `requestAnimationFrame` timer (prevents browser throttling)
-  - Framer Motion fade-in animations
-  - React Markdown rendering with error boundaries
-  - Real-time execution timer
+Narrow factual questions bypass the full research pipeline:
 
-### Backend API (FastAPI)
-- **File**: `api.py`
-- **Deployment**: Google Cloud Run
-- **Features**:
-  - Health check endpoint (`/health`) for Cloud Run probes
-  - Streaming research endpoint (`/research`) with NDJSON format
-  - **Queue-based event generator**: Shields LangGraph from client disconnects
-  - CORS enabled for frontend integration
-  - 10-minute timeout support (configurable)
-  - Structured error handling with full tracebacks
-  - LangSmith tracing integration (always finalizes)
+```
+Question → Fact Target → Targeted Search → Decisive Evidence
+       → Structured Fact Value → Validation → Canonical Claim → Concise Answer
+```
 
-### Agent Nodes
+Implemented in `services/fast_path.py`, `services/fact_target.py`, `services/fact_value.py`, `nodes/fast_path.py`. On failure, escalates to the STANDARD/DEEP path at Planner.
 
-1. **Planner Node** (`nodes/planner.py`)
-   - Analyzes user query
-   - Generates structured research plan
-   - Detects technical/academic queries
-   - Injects domain filters (arxiv.org, github.com, etc.)
-   - Caches plans in Supabase
+### Route: STANDARD / DEEP
 
-2. **Researcher Node** (`nodes/researcher.py`)
-   - Executes searches via Tavily API
-   - Filters blacklisted domains (Medium, LinkedIn, etc.)
-   - Applies domain whitelisting for technical queries
-   - Aggregates results with retry logic
+Full evidence-grounded pipeline with configurable research budgets (`services/query_router.py`).
 
-3. **Critic Node** (`nodes/critic.py`)
-   - Evaluates research quality (freshness, bias, completeness)
-   - Scores quality (0-1)
-   - Determines if refinement needed
-   - Implements recursive loop guard
+## Trusted Research Chain
 
-4. **Writer Node** (`nodes/writer.py`)
-   - Synthesizes final report from approved research
-   - Formats with citations
-   - Calculates confidence score
-   - Persists to Supabase
+```
+SOURCE
+  → VALIDATED EVIDENCE
+  → DIRECT ATOMIC CLAIM
+  → MATERIAL CLAIM
+  → CROSS-SOURCE VERIFICATION
+  → KNOWLEDGE STATE
+  → REPORT
+```
 
-## State Flow
+Every cited fact in the Writer report should trace: **Answer → Evidence → Source → URL**. Claims and verifications provide structured provenance; Knowledge State summarizes epistemic status per material claim.
 
-1. **Planner**: Analyzes user query, generates structured research plan (sub-queries, search terms, domain filters)
-2. **Researcher**: Executes searches via Tavily API (with retries), aggregates results, filters spam
-3. **Critic**: Evaluates result quality (freshness, bias, completeness), decides if refinement needed
-4. **Writer**: Synthesizes final report from approved research results
+## Query Routing
 
-## Recursive Loop Guard
+`services/query_router.py` classifies each query:
 
-- **Maximum iterations**: 3 cycles (Planner → Researcher → Critic → Researcher)
-- **Quality threshold**: Critic must score >= 0.7 to proceed
-- **Timeout**: 10 minutes for Cloud Run deployment
-- **Error handling**: Structured errors (Retryable vs Fatal)
+| Route | Typical use | Budget highlights |
+|-------|-------------|-------------------|
+| `simple_fact` | Capital, winner, revenue, CEO, date | 1 search, ~3 sources, 0 critic iterations |
+| `standard` | Summaries, multi-part facts | 3 searches, ~8 sources, 1 iteration |
+| `deep` | Comparisons, strategy, causal | 5 searches, more sources, 2 iterations |
+
+Output: `QueryClassification` stored in `state.query_classification` with a `ResearchBudget` (search caps, claim depth, evidence caps, `max_iterations`).
+
+## Node Responsibilities
+
+| Node | File | Role |
+|------|------|------|
+| Router | `nodes/router.py` | Classify query; set route and budget |
+| Fast Path | `nodes/fast_path.py` | SIMPLE_FACT answer or escalation |
+| Planner | `nodes/planner.py` | Sub-queries, search terms, domain filters |
+| Researcher | `nodes/researcher.py` | Tavily search, spam filter, source normalization |
+| Evidence Extractor | `nodes/evidence_extractor.py` | Verbatim passages + integrity validation |
+| Claim Extractor | `nodes/claim_extractor.py` | Atomic claims, materiality, origin SUPPORTS links |
+| Claim Verifier | `nodes/claim_verifier.py` | Cross-source SUPPORTS / CONTRADICTS / QUALIFIES |
+| Critic | `nodes/critic.py` | Evidence quality; refinement loop guard |
+| Knowledge State | `nodes/knowledge_state.py` | Deterministic epistemic buckets (Phase 2D) |
+| Writer | `nodes/writer.py` | Evidence-grounded report with `[E#]` citations |
+
+## Evidence Layer (Phase 2A)
+
+- **Source normalization**: `services/source_normalizer.py` — Tavily hits → `Source` entities
+- **Extraction**: `services/evidence_pipeline.py`, `services/evidence_extractor.py`
+- **Validation**: `services/evidence_validator.py` — span integrity (exact / normalized / fuzzy match)
+- **Output**: `validated_evidence[]` with provenance (`source_id`, locator, match type)
+
+## Claim Layer (Phase 2B)
+
+- **Pipeline**: `services/claim_pipeline.py` — LLM candidates → deterministic support check → relevance → batch validation → dedup
+- **Materiality**: `services/claim_relevance.py` — filters to `material_claims`
+- **Origin links**: `claim_evidence_relations` with `SUPPORTS` only at extraction time
+
+### Claim–evidence relationships
+
+| Relationship | Meaning |
+|--------------|---------|
+| `supports` | Evidence substantiates the claim |
+| `contradicts` | Evidence conflicts with the claim |
+| `qualifies` | Evidence narrows or conditions the claim |
+| `contextualizes` | Reserved; not used in current verification aggregation |
+
+## Cross-Source Verification (Phase 2C)
+
+`services/claim_verification.py` — **material claims only**.
+
+1. Preserves origin `SUPPORTS` from claim extraction
+2. Selects cross-source evidence (excludes origin evidence IDs and origin publisher domains)
+3. Classifies additional pairs deterministically, then batched LLM for ambiguous cases
+4. Aggregates to `VerificationResult` per claim
+
+### Verification statuses
+
+| Status | Typical meaning |
+|--------|-----------------|
+| `supported` | 2+ independent publisher domains support; no contradicts |
+| `partially_supported` | Single-source or qualified support |
+| `uncertain` | Credible support and contradict coexist |
+| `contradicted` | Contradict without support |
+| `insufficient_evidence` | No meaningful relevant evidence links |
+| `unverifiable` | Claim type not verifiable from documentary evidence |
+
+**Publisher-domain independence** uses `source.metadata["domain"]`. Same domain on different URLs counts as one publisher — an approximation, not true source lineage.
+
+## Knowledge State (Phase 2D)
+
+`services/knowledge_state.py` — **derived layer, no LLM**.
+
+Runs only on **final Critic exit** (sufficient or max iterations), before Writer. **Not** derived during researcher refinement loops.
+
+### Inputs
+
+- `material_claims`
+- `verification_results`
+- `claim_evidence_relations`
+- `critique.unsupported_areas` (information gaps only)
+
+### Buckets
+
+| Bucket | Derivation |
+|--------|------------|
+| `known` | `supported` + `high` confidence → persisted `knowledge_category = known` |
+| `likely` | `partially_supported` → `likely` |
+| `disputed` | `uncertain` → `disputed` |
+| `unknown` | `insufficient_evidence` → `unknown` |
+| `contradicted` | `contradicted` status; `knowledge_category` left `null` |
+| `unverifiable` | `unverifiable` status; `knowledge_category` left `null` |
+| `information_gaps` | Critic `unsupported_areas` as gap hints (`source = critic_unsupported_area`) |
+
+Entries reference `claim_id`, `verification_id`, `relation_ids`, `evidence_ids` — **no claim text duplication**.
+
+Orphan material claims (no matching `VerificationResult`) are **not** classified as UNKNOWN; they increment `orphan_material_claims` in metrics.
+
+### Fast-path limitation
+
+Successful SIMPLE_FACT runs bypass Claim Verifier and **do not** receive Knowledge State in the current MVP.
+
+## AgentState
+
+Defined in `state.py` as a LangGraph `TypedDict`. Key fields:
+
+| Area | Fields |
+|------|--------|
+| Routing | `query_classification`, `fast_path_metrics`, `escalate_to_standard`, `escalated_from_fast_path` |
+| Artifacts | `normalized_sources`, `validated_evidence`, `validated_claims`, `material_claims`, `claim_evidence_relations`, `verification_results`, `knowledge_state` |
+| Control | `critique`, `iteration_count`, `current_node`, `research_sufficient` |
+| Output | `final_report` |
+| Metrics | `evidence_metrics`, `claim_metrics`, `verification_metrics`, `cost_metrics`, `report_metrics` |
+
+Domain entities live in `domain/models.py` (`Source`, `Evidence`, `Claim`, `ClaimEvidenceRelation`, `VerificationResult`, etc.).
+
+## Persistence (Supabase)
+
+Optional — controlled by `SUPABASE_URL` / `SUPABASE_KEY`. When disabled, in-memory negative IDs are used.
+
+### Tables
+
+| Table | Purpose |
+|-------|---------|
+| `research_runs` | Run lifecycle, metadata snapshot (includes `knowledge_state`) |
+| `sources` | Normalized search hits |
+| `evidence` | Validated passages |
+| `claims` | Atomic claims |
+| `claim_evidence` | Claim ↔ evidence relationships |
+| `verifications` | Per-claim verification + `knowledge_category` (known/likely/disputed/unknown) |
+| `research_reports` | Final reports (legacy + optional `research_run_id` link) |
+
+Legacy cache tables (`research_plans`, etc.) remain in `db/schema.sql`. Evidence foundation tables are in `db/migrations/001_evidence_foundation.sql`.
+
+Repositories: `db/evidence_repositories.py`, `db/repository.py`.
+
+**Note:** There is no full caching system for evidence or claims. Plan caching (`ENABLE_CACHING`) applies to research plans only.
 
 ## Observability
 
-- **LangSmith**: Full trace of all LLM calls, node transitions, metadata
-- **Structured Logging**: JSON logs with PII redaction
-- **Error Tracking**: Categorized errors with full tracebacks
-- **Performance Metrics**: Latency tracking per node
+- **LangSmith**: `utils/observability.py` — `trace_llm_call` spans per node/operation
+- **Structured logging**: JSON logs with PII redaction (`utils/pii_redaction.py`)
+- **Per-stage metrics**: `*_metrics` dicts on state; `cost_metrics` aggregates run-level counters including knowledge-state counts
 
-## Deployment Architecture
+## Streaming API
 
-- **Backend**: Docker container on Google Cloud Run
-- **Frontend**: Next.js on Vercel (or similar)
-- **Database**: Supabase (PostgreSQL) for caching and persistence
-- **Monitoring**: LangSmith for observability
+`api.py` uses a queue-based NDJSON event generator:
 
-## Data Flow
+- LangGraph runs in a background task
+- Events: `log`, `result`, `error`, `done`
+- Client disconnects do not kill the graph run (LangSmith traces finalize)
 
-1. **User submits query** via Next.js UI
-2. **Frontend API route** (Edge runtime) proxies to FastAPI backend
-3. **FastAPI** creates `event_generator` with queue-based architecture:
-   - Starts LangGraph in background task (`asyncio.create_task`)
-   - LangGraph outputs are queued (`asyncio.Queue`)
-   - Main generator reads from queue and yields NDJSON events
-4. **Agent nodes execute** sequentially with recursive refinement:
-   - Planner → Researcher → Critic → (loop if needed) → Writer
-5. **Events streamed** as NDJSON:
-   - `{"type": "log", "content": "...", "node": "planner"}\n`
-   - `{"type": "result", "report": {...}}\n`
-   - `{"type": "done"}\n`
-6. **Frontend parses** NDJSON line-by-line and updates UI in real-time
-7. **Result displayed** with fade-in animation
+See [README.md](../README.md) for deployment and entry points.
 
-## Streaming Architecture
+## Known Limitations (Current)
 
-### Queue-Based Event Generator
+- Writer does **not** consume `verification_results` or `knowledge_state`
+- Critic does **not** consume verification results
+- Successful fast-path runs have no Knowledge State
+- Publisher-domain independence is approximate
+- Cross-domain `supported` / `known` depends on retrieval yielding diverse sources
+- No Decision Engine, monitoring, or change detection
 
-The `event_generator` in `api.py` uses a **queue-based architecture** to decouple LangGraph from the HTTP stream:
+## Testing
 
-```python
-# LangGraph runs in background task (cannot be killed by disconnect)
-graph_task = asyncio.create_task(run_graph())
-
-# Main generator reads from queue (isolated from LangGraph)
-while True:
-    item = await queue.get()
-    # Yield NDJSON events to client
+```bash
+uv run pytest   # 178 tests, no live LLM for core logic
 ```
 
-**Benefits**:
-- **GeneratorExit isolation**: Client disconnects never reach LangGraph's generator
-- **Guaranteed completion**: LangGraph always finishes, even if client disconnects
-- **LangSmith compatibility**: Traces always finalize (green checkmark)
-- **Real-time progress**: Client sees updates as nodes execute
+Phase validation scripts (manual / constrained live):
 
-### NDJSON Event Format
-
-- **`log`**: Progress updates (`{"type": "log", "content": "...", "node": "planner"}`)
-- **`result`**: Final report (`{"type": "result", "report": {...}}`)
-- **`error`**: Error messages (`{"type": "error", "error": "..."}`)
-- **`done`**: Completion signal (`{"type": "done"}`)
-
-### Frontend Streaming
-
-- **Edge Runtime**: Next.js API route uses `export const runtime = "edge"`
-- **Stream Piping**: Directly pipes backend response body to frontend
-- **Line-by-line parsing**: Uses `TextDecoder` and `ReadableStream` reader
-- **Real-time updates**: Updates UI state as events arrive
+- `scripts/validate_phase_2a5_e2e.py` — evidence
+- `scripts/validate_phase_2b_e2e.py` — claims
+- `scripts/validate_phase_2b7_e2e.py` — fast path
+- `scripts/validate_phase_2c_e2e.py` — verification
+- `scripts/validate_phase_2d_e2e.py` — knowledge state

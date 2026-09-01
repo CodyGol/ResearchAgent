@@ -13,7 +13,7 @@
 
 3. **Run The Oracle:**
    ```bash
-   python graph.py
+   uv run python run_research.py "Your research query here"
    ```
 
 ## Step 1: Create `.env` File
@@ -80,17 +80,17 @@ ENVIRONMENT=local-dev
 ### Create Database Tables
 
 1. In Supabase Dashboard, go to **SQL Editor**
-2. Click **New Query**
-3. Copy the contents of `db/schema.sql` and paste it
-4. Click **Run** to execute
+2. Run **`db/schema.sql`** — legacy plan cache and `research_reports`
+3. Run **`db/migrations/001_evidence_foundation.sql`** — research runs, sources, evidence, claims, claim_evidence, verifications
 
-This creates the tables needed for caching and report storage.
+This enables plan caching, report storage, and the evidence-backed persistence layer.
 
 ## Step 3: Supabase Setup (Optional)
 
 Supabase is optional but recommended for:
-- **Caching research plans** (saves LLM calls)
-- **Persisting reports** (all research saved to database)
+- **Caching research plans** (saves LLM calls when `ENABLE_CACHING=true`)
+- **Persisting research runs** — sources, evidence, claims, verifications, knowledge categories
+- **Persisting reports** (writer node)
 
 ### Setup Supabase
 
@@ -98,7 +98,8 @@ Supabase is optional but recommended for:
 2. **Add to `.env`** (see template above)
 3. **Create database tables:**
    - Open Supabase Dashboard → SQL Editor
-   - Run the SQL from `db/schema.sql`
+   - Run `db/schema.sql`
+   - Run `db/migrations/001_evidence_foundation.sql`
 
 **Note:** If you skip Supabase, the system will work without caching/persistence.
 
@@ -133,10 +134,13 @@ Test your configuration:
 
 ```bash
 # Test Supabase connection (if configured)
-python test_supabase.py
+uv run python test_supabase.py
 
-# Run The Oracle
-python graph.py
+# Run unit tests (178 tests, no live LLM for core logic)
+uv run pytest
+
+# Run The Oracle CLI
+uv run python run_research.py "test query"
 ```
 
 ## Troubleshooting
@@ -164,7 +168,7 @@ The production backend (`api.py`) uses:
 - **Health checks**: `/health` endpoint for Cloud Run probes
 - **CORS enabled**: Allows frontend integration
 
-See [README.md](README.md) and [docs/architecture.md](docs/architecture.md) for deployment details.
+See [README.md](README.md), [docs/architecture.md](docs/architecture.md), and [docs/roadmap.md](docs/roadmap.md) for deployment and architecture details.
 
 ### Frontend (Next.js)
 

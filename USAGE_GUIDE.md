@@ -1,13 +1,26 @@
 # ResearchAgentv2 - Complete Usage Guide
 
-## 🎯 System Overview
+## System Overview
 
-ResearchAgentv2 is a production-grade recursive deep-research agent system with:
-- **Backend**: FastAPI service deployed on Google Cloud Run
-- **Frontend**: Next.js Generative UI (Terminal-style interface)
-- **Agent**: LangGraph state machine with 4 nodes (Planner → Researcher → Critic → Writer)
-- **Observability**: LangSmith tracing and structured logging
-- **Evaluation**: Automated testing with LLM-as-a-Judge
+ResearchAgentv2 is an evidence-grounded research agent (Phase 2D) with:
+
+- **Backend**: FastAPI service (`api.py`) with NDJSON streaming
+- **Frontend**: Next.js Deep Research Console (`research-client/`)
+- **Agent**: LangGraph pipeline — Router → (Fast Path | full pipeline) → Knowledge State → Writer
+- **Persistence**: Optional Supabase (research runs, sources, evidence, claims, verifications)
+- **Observability**: LangSmith tracing and per-stage metrics
+- **Tests**: 178 passing (`uv run pytest`)
+
+**Full pipeline (STANDARD / DEEP):**
+
+```
+Planner → Researcher → Evidence Extractor → Claim Extractor → Claim Verifier → Critic
+  → (loop to Researcher | Knowledge State → Writer)
+```
+
+**Trusted chain:** SOURCE → VALIDATED EVIDENCE → MATERIAL CLAIM → VERIFICATION → KNOWLEDGE STATE → REPORT
+
+See [docs/architecture.md](docs/architecture.md) for diagrams. See [docs/roadmap.md](docs/roadmap.md) for what is not yet implemented (Decision Engine, Writer/Knowledge State integration, etc.).
 
 ---
 
@@ -40,32 +53,30 @@ python run_research.py "Your research query here"
 
 ### Option 3: Python API
 
+Always bootstrap state with `create_initial_state` (routing, research run, metrics):
+
 ```python
-from graph import create_graph
+from graph import create_graph, create_run_config
+from services.pipeline_init import create_initial_state, finalize_from_state
 import asyncio
 
 async def research(query: str):
     graph = create_graph()
     app = graph.compile()
-    
-    initial_state = {
-        "user_query": query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
-    
-    result = await app.ainvoke(initial_state)
-    return result["final_report"]
+    state, ctx = await create_initial_state(query)
+    result = await app.ainvoke(state, config=create_run_config())
+    await finalize_from_state(result, ctx)
+    return result
 
-# Run it
-report = asyncio.run(research("Latest AI safety research"))
+result = asyncio.run(research("Latest AI safety research"))
+report = result["final_report"]
+knowledge_state = result.get("knowledge_state")  # full pipeline only; None on fast-path success
 print(report.content)
+if knowledge_state:
+    print(knowledge_state["metrics"])
 ```
+
+> **Note:** Use `create_initial_state` for all programmatic runs so routing, persistence, and metrics initialize correctly.
 
 ### Option 4: REST API (Streaming)
 
@@ -143,11 +154,12 @@ Create `.env` file in project root:
 ANTHROPIC_API_KEY=sk-ant-...
 TAVILY_API_KEY=tvly-...
 
-# Optional - Supabase (for caching)
+# Optional - Supabase (persistence + plan cache)
 SUPABASE_URL=https://xxx.supabase.co
 SUPABASE_KEY=xxx
 ENABLE_CACHING=true
 CACHE_TTL_HOURS=24
+# Also run db/migrations/001_evidence_foundation.sql for evidence/claim tables
 
 # Optional - LangSmith (for observability)
 LANGCHAIN_TRACING_V2=true
@@ -169,7 +181,39 @@ MAX_RESEARCH_ITERATIONS=5  # More refinement cycles
 
 ---
 
-## 🔧 Advanced Usage
+## Testing & Phase Validation
+
+### Unit / integration tests (no live LLM for core logic)
+
+```bash
+uv run pytest              # 178 tests
+uv run pytest tests/test_knowledge_state.py -v
+uv run pytest tests/test_claim_verification.py -v
+```
+
+### Evaluation (requires API keys)
+
+```bash
+uv run python run_eval.py
+```
+
+### Phase inspection scripts (constrained / manual)
+
+| Script | Inspects |
+|--------|----------|
+| `scripts/validate_phase_2a5_e2e.py` | Evidence extraction |
+| `scripts/validate_phase_2b_e2e.py` | Claim extraction |
+| `scripts/validate_phase_2b7_e2e.py` | SIMPLE_FACT fast path |
+| `scripts/validate_phase_2c_e2e.py` | Cross-source verification |
+| `scripts/validate_phase_2d_e2e.py` | Knowledge State buckets |
+
+```bash
+uv run python scripts/validate_phase_2d_e2e.py "Who won the 2023 Formula 1 World Championship?"
+```
+
+---
+
+## Advanced Usage
 
 ### 1. Evaluation System
 
@@ -190,24 +234,16 @@ This will:
 For direct LangGraph streaming (bypassing the API):
 
 ```python
+from graph import create_graph, create_run_config
+from services.pipeline_init import create_initial_state
+
 async def stream_research(query: str):
     graph = create_graph()
     app = graph.compile()
-    
-    initial_state = {
-        "user_query": query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
-    
+    state, _ctx = await create_initial_state(query)
     run_config = create_run_config()  # For LangSmith tracing
-    
-    async for chunk in app.astream(initial_state, config=run_config):
+
+    async for chunk in app.astream(state, config=run_config):
         node_name = list(chunk.keys())[0]
         state = chunk[node_name]
         
@@ -226,30 +262,23 @@ async def stream_research(query: str):
 ### 3. Error Recovery & Retry
 
 ```python
+from graph import create_graph, create_run_config
+from services.pipeline_init import create_initial_state, finalize_from_state
+
 async def robust_research(query: str, max_retries: int = 3):
     for attempt in range(max_retries):
         try:
             graph = create_graph()
             app = graph.compile()
-            
-            state = {
-                "user_query": query,
-                "research_plan": None,
-                "research_results": None,
-                "critique": None,
-                "final_report": None,
-                "current_node": "planner",
-                "iteration_count": 0,
-                "error": None,
-            }
-            
-            result = await app.ainvoke(state)
-            
+            state, ctx = await create_initial_state(query)
+            result = await app.ainvoke(state, config=create_run_config())
+            await finalize_from_state(result, ctx)
+
             if result.get("error"):
                 raise Exception(result["error"])
-            
+
             return result
-            
+
         except Exception as e:
             if attempt == max_retries - 1:
                 raise
@@ -260,22 +289,15 @@ async def robust_research(query: str, max_retries: int = 3):
 ### 4. State Inspection & Debugging
 
 ```python
+from graph import create_graph, create_run_config
+from services.pipeline_init import create_initial_state
+
 async def debug_research(query: str):
     graph = create_graph()
     app = graph.compile()
-    
-    state = {
-        "user_query": query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
-    
-    async for chunk in app.astream(state):
+    state, _ctx = await create_initial_state(query)
+
+    async for chunk in app.astream(state, config=create_run_config()):
         node_name = list(chunk.keys())[0]
         node_state = chunk[node_name]
         
@@ -299,9 +321,15 @@ async def debug_research(query: str):
             critique = node_state["critique"]
             print(f"Quality score: {critique.quality_score:.2f}")
             print(f"Sufficient: {critique.is_sufficient}")
+            if critique.unsupported_areas:
+                print(f"Unsupported areas: {critique.unsupported_areas}")
             if critique.issues:
                 print(f"Issues: {critique.issues}")
-        
+
+        if node_name == "knowledge_state" and node_state.get("knowledge_state"):
+            ks = node_state["knowledge_state"]
+            print(f"Knowledge metrics: {ks.get('metrics', {})}")
+
         if node_name == "writer" and node_state.get("final_report"):
             report = node_state["final_report"]
             print(f"Report length: {len(report.content)} chars")
@@ -354,25 +382,20 @@ def research_via_api(query: str):
 ### 2. Batch Processing
 
 ```python
+from graph import create_graph, create_run_config
+from services.pipeline_init import create_initial_state, finalize_from_state
+
 async def batch_research(queries: list[str]):
     graph = create_graph()
     app = graph.compile()
-    
+
     results = []
     for query in queries:
-        state = {
-            "user_query": query,
-            "research_plan": None,
-            "research_results": None,
-            "critique": None,
-            "final_report": None,
-            "current_node": "planner",
-            "iteration_count": 0,
-            "error": None,
-        }
-        result = await app.ainvoke(state)
+        state, ctx = await create_initial_state(query)
+        result = await app.ainvoke(state, config=create_run_config())
+        await finalize_from_state(result, ctx)
         results.append(result)
-    
+
     return results
 ```
 
@@ -381,25 +404,16 @@ async def batch_research(queries: list[str]):
 ```python
 import asyncio
 from datetime import datetime
-from graph import create_graph
+from graph import create_graph, create_run_config
+from services.pipeline_init import create_initial_state, finalize_from_state
 
 async def scheduled_research(query: str, schedule_name: str):
     """Run research and save results with timestamp."""
     graph = create_graph()
     app = graph.compile()
-    
-    state = {
-        "user_query": query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
-    
-    result = await app.ainvoke(state)
+    state, ctx = await create_initial_state(query)
+    result = await app.ainvoke(state, config=create_run_config())
+    await finalize_from_state(result, ctx)
     report = result["final_report"]
     
     # Save with timestamp
@@ -465,7 +479,9 @@ All LLM calls are logged with:
 ### 4. Error Handling
 Always check for errors:
 ```python
-result = await app.ainvoke(state)
+state, ctx = await create_initial_state(query)
+result = await app.ainvoke(state, config=create_run_config())
+await finalize_from_state(result, ctx)
 if result.get("error"):
     raise Exception(f"Research failed: {result['error']}")
 ```
@@ -482,9 +498,9 @@ if result.get("error"):
 
 ### Issue: Slow Execution
 **Solution**: 
-- Process sub-queries in parallel
-- Reduce `max_results` in searches
-- Cache research plans (Supabase)
+- Use SIMPLE_FACT phrasing for narrow factual questions (fast path)
+- Reduce `max_iterations` via query complexity (router assigns budgets)
+- Reduce search result limits in researcher budget
 
 ### Issue: Quality Always Insufficient
 **Solution**: Lower `QUALITY_THRESHOLD` or improve search query quality
@@ -591,4 +607,4 @@ python run_eval.py
 
 ---
 
-ResearchAgentv2 is designed to be a **self-correcting, quality-assured research system**. Leverage its recursive refinement and quality checks to get comprehensive, well-sourced research reports automatically.
+ResearchAgentv2 is a **self-correcting, evidence-grounded research system**. The full pipeline produces validated evidence, verified material claims, a deterministic Knowledge State, and a cited report. See [docs/architecture.md](docs/architecture.md) for current limitations (e.g. Writer does not yet consume Knowledge State).
