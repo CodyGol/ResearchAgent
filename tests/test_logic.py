@@ -216,6 +216,8 @@ class TestStateStructure:
             "verification_results": None,
             "verification_metrics": None,
             "knowledge_state": None,
+            "decision_frame": None,
+            "decision_frame_metrics": None,
             "claim_metrics": None,
             "source_dedup_metrics": None,
             "report_metrics": None,

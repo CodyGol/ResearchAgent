@@ -20,6 +20,7 @@ from nodes.critic import critic_node
 from nodes.evidence_extractor import evidence_extractor_node
 from nodes.planner import planner_node
 from nodes.researcher import researcher_node
+from nodes.decision_framer import decision_framer_node
 from nodes.knowledge_state import knowledge_state_node
 from nodes.writer import writer_node
 from services.pipeline_init import create_initial_state
@@ -31,15 +32,15 @@ def create_graph() -> StateGraph:
     Create and configure the LangGraph StateGraph for The Oracle.
 
     Graph structure:
-        START -> router -> [fast_path | planner]
-        fast_path -> [END | planner]  (escalation)
-        planner -> researcher -> evidence_extractor -> claim_extractor -> claim_verifier -> critic
-            -> (researcher | knowledge_state -> writer) -> END
+        START -> router -> [fast_path | decision_framer]
+        fast_path -> [END | decision_framer]  (escalation)
+        decision_framer -> planner -> researcher -> ... -> knowledge_state -> writer -> END
     """
     graph = StateGraph(AgentState)
 
     graph.add_node("router", router_node)
     graph.add_node("fast_path", fast_path_node)
+    graph.add_node("decision_framer", decision_framer_node)
     graph.add_node("planner", planner_node)
     graph.add_node("researcher", researcher_node)
     graph.add_node("evidence_extractor", evidence_extractor_node)
@@ -56,24 +57,26 @@ def create_graph() -> StateGraph:
         route = classification.get("route", "standard")
         if route == "simple_fact" and not state.get("escalated_from_fast_path"):
             return "fast_path"
-        return "planner"
+        return "decision_framer"
 
     graph.add_conditional_edges(
         "router",
         route_after_router,
-        {"fast_path": "fast_path", "planner": "planner"},
+        {"fast_path": "fast_path", "decision_framer": "decision_framer"},
     )
 
     def route_after_fast_path(state: AgentState) -> str:
         if state.get("escalate_to_standard"):
-            return "planner"
+            return "decision_framer"
         return "end"
 
     graph.add_conditional_edges(
         "fast_path",
         route_after_fast_path,
-        {"planner": "planner", "end": END},
+        {"decision_framer": "decision_framer", "end": END},
     )
+
+    graph.add_edge("decision_framer", "planner")
 
     graph.add_edge("planner", "researcher")
     graph.add_edge("researcher", "evidence_extractor")

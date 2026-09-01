@@ -189,6 +189,12 @@ class AgentState(TypedDict):
     knowledge_state: Annotated[
         dict | None, "Derived knowledge state snapshot (Phase 2D)"
     ]
+    decision_frame: Annotated[
+        dict | None, "Structured decision frame (Phase 3A)"
+    ]
+    decision_frame_metrics: Annotated[
+        dict | None, "Decision framing observability metrics"
+    ]
     cost_metrics: Annotated[
         dict | None, "Cost and latency observability metrics"
     ]
@@ -244,6 +250,7 @@ class AgentState(TypedDict):
             "claim_extractor",
             "claim_verifier",
             "critic",
+            "decision_framer",
             "knowledge_state",
             "writer",
             "end",

@@ -38,6 +38,8 @@ async def create_initial_state(query: str) -> tuple[AgentState, RunContext]:
         "verification_results": None,
         "verification_metrics": None,
         "knowledge_state": None,
+        "decision_frame": None,
+        "decision_frame_metrics": None,
         "claim_metrics": None,
         "source_dedup_metrics": None,
         "report_metrics": None,
@@ -90,6 +92,8 @@ async def finalize_from_state(state: AgentState, ctx: RunContext) -> None:
             "knowledge_state_metrics": (
                 (state.get("knowledge_state") or {}).get("metrics")
             ),
+            "decision_frame": state.get("decision_frame"),
+            "decision_frame_metrics": state.get("decision_frame_metrics"),
         },
         error=state.get("error"),
     )

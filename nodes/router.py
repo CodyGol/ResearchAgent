@@ -19,7 +19,7 @@ async def router_node(state: AgentState) -> AgentState:
 
     state["query_classification"] = classification.model_dump(mode="json")
     route = classification.route.value
-    state["current_node"] = "fast_path" if route == "simple_fact" else "planner"
+    state["current_node"] = "fast_path" if route == "simple_fact" else "decision_framer"
 
     logger.info(
         "Query classified as %s / route=%s: %s",
