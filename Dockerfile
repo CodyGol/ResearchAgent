@@ -29,6 +29,8 @@ RUN sed -i '/^-e file:/d' requirements.txt && \
 # Copy application code
 COPY config.py graph.py state.py api.py ./
 COPY nodes/ ./nodes/
+COPY services/ ./services/
+COPY domain/ ./domain/
 COPY tools/ ./tools/
 COPY utils/ ./utils/
 COPY db/ ./db/
