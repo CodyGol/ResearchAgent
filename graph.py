@@ -12,10 +12,17 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END, START
 
 from config import settings
+from nodes.router import router_node
+from nodes.fast_path import fast_path_node
+from nodes.claim_extractor import claim_extractor_node
+from nodes.claim_verifier import claim_verifier_node
 from nodes.critic import critic_node
+from nodes.evidence_extractor import evidence_extractor_node
 from nodes.planner import planner_node
 from nodes.researcher import researcher_node
+from nodes.knowledge_state import knowledge_state_node
 from nodes.writer import writer_node
+from services.pipeline_init import create_initial_state
 from state import AgentState
 
 
@@ -24,95 +31,99 @@ def create_graph() -> StateGraph:
     Create and configure the LangGraph StateGraph for The Oracle.
 
     Graph structure:
-        START -> planner -> researcher -> critic -> (writer | researcher) -> END
-
-    The critic node has a conditional edge that loops back to researcher
-    if quality is insufficient (recursive refinement).
-
-    Returns:
-        Configured StateGraph instance
+        START -> router -> [fast_path | planner]
+        fast_path -> [END | planner]  (escalation)
+        planner -> researcher -> evidence_extractor -> claim_extractor -> claim_verifier -> critic
+            -> (researcher | knowledge_state -> writer) -> END
     """
     graph = StateGraph(AgentState)
 
-    # Add nodes
+    graph.add_node("router", router_node)
+    graph.add_node("fast_path", fast_path_node)
     graph.add_node("planner", planner_node)
     graph.add_node("researcher", researcher_node)
+    graph.add_node("evidence_extractor", evidence_extractor_node)
+    graph.add_node("claim_extractor", claim_extractor_node)
+    graph.add_node("claim_verifier", claim_verifier_node)
     graph.add_node("critic", critic_node)
+    graph.add_node("knowledge_state", knowledge_state_node)
     graph.add_node("writer", writer_node)
 
-    # Define edges
-    graph.add_edge(START, "planner")
-    graph.add_edge("planner", "researcher")
-    graph.add_edge("researcher", "critic")
+    graph.add_edge(START, "router")
 
-    # Conditional edge from critic: loop back to researcher or proceed to writer
-    def should_continue(state: AgentState) -> str:
-        """Route based on critique result."""
+    def route_after_router(state: AgentState) -> str:
+        classification = state.get("query_classification") or {}
+        route = classification.get("route", "standard")
+        if route == "simple_fact" and not state.get("escalated_from_fast_path"):
+            return "fast_path"
+        return "planner"
+
+    graph.add_conditional_edges(
+        "router",
+        route_after_router,
+        {"fast_path": "fast_path", "planner": "planner"},
+    )
+
+    def route_after_fast_path(state: AgentState) -> str:
+        if state.get("escalate_to_standard"):
+            return "planner"
+        return "end"
+
+    graph.add_conditional_edges(
+        "fast_path",
+        route_after_fast_path,
+        {"planner": "planner", "end": END},
+    )
+
+    graph.add_edge("planner", "researcher")
+    graph.add_edge("researcher", "evidence_extractor")
+    graph.add_edge("evidence_extractor", "claim_extractor")
+    graph.add_edge("claim_extractor", "claim_verifier")
+    graph.add_edge("claim_verifier", "critic")
+
+    def route_after_critic(state: AgentState) -> str:
         critique = state.get("critique")
         if not critique:
-            return "writer"  # Fallback if critique missing
+            return "knowledge_state"
 
         if critique.is_sufficient:
-            return "writer"
-        else:
-            # Check iteration limit
-            iteration = state.get("iteration_count", 0)
-            if iteration >= settings.max_research_iterations:
-                return "writer"  # Force proceed
-            return "researcher"  # Loop back
+            return "knowledge_state"
+
+        iteration = state.get("iteration_count", 0)
+        classification = state.get("query_classification") or {}
+        budget = classification.get("research_budget", {})
+        max_iter = budget.get("max_iterations", settings.max_research_iterations)
+        if iteration >= max_iter:
+            return "knowledge_state"
+        return "researcher"
 
     graph.add_conditional_edges(
         "critic",
-        should_continue,
-        {
-            "researcher": "researcher",
-            "writer": "writer",
-        },
+        route_after_critic,
+        {"researcher": "researcher", "knowledge_state": "knowledge_state"},
     )
 
+    graph.add_edge("knowledge_state", "writer")
     graph.add_edge("writer", END)
 
     return graph
 
 
 def get_langsmith_trace_url() -> str | None:
-    """
-    Generate LangSmith trace URL for the current run.
-    
-    Returns:
-        URL string if LangSmith is configured, None otherwise
-    """
-    # Check if LangSmith tracing is enabled
     if not os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true":
         return None
-    
     try:
         from langsmith import Client
-        
         client = Client()
         project_name = settings.langchain_project
-        
-        # Get organization ID from API key or environment
         org_id = os.getenv("LANGCHAIN_ORG_ID") or "default"
-        
-        # Construct trace URL (LangSmith project URL format)
         base_url = os.getenv("LANGCHAIN_ENDPOINT", "https://smith.langchain.com")
-        trace_url = f"{base_url}/o/{org_id}/projects/p/{project_name}"
-        
-        return trace_url
+        return f"{base_url}/o/{org_id}/projects/p/{project_name}"
     except Exception:
-        # Fallback if LangSmith client not available
-        project_name = settings.langchain_project
-        return f"https://smith.langchain.com/o/<org-id>/projects/p/{project_name}"
+        return f"https://smith.langchain.com/o/<org-id>/projects/p/{settings.langchain_project}"
 
 
 def create_run_config() -> RunnableConfig:
-    """
-    Create RunnableConfig with LangSmith metadata and tags.
-    
-    Returns:
-        Configured RunnableConfig for tracing
-    """
     return RunnableConfig(
         metadata={
             "env": settings.environment,
@@ -123,37 +134,21 @@ def create_run_config() -> RunnableConfig:
 
 
 async def main():
-    """Entry point for testing the graph."""
     graph = create_graph()
     app = graph.compile()
-
-    # Configure LangSmith tracing
     run_config = create_run_config()
-    
-    # Print trace URL at start (Rule 3.C: Observability)
     trace_url = get_langsmith_trace_url()
     if trace_url:
         print(f"🛠️  View Trace: {trace_url}\n")
 
-    # Test with mock query
-    initial_state: AgentState = {
-        "user_query": "What are the latest developments in AI safety?",
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
+    query = "What are the latest developments in AI safety?"
+    initial_state, _ctx = await create_initial_state(query)
 
     print("🚀 Starting The Oracle...")
     print(f"Query: {initial_state['user_query']}\n")
 
-    # Execute graph with LangSmith config (use ainvoke for async nodes)
     final_state = await app.ainvoke(initial_state, config=run_config)
 
-    # Display results
     if final_state.get("error"):
         print(f"❌ Error: {final_state['error']}")
     else:
@@ -170,5 +165,4 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-
     asyncio.run(main())

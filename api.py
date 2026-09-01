@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from graph import create_graph, create_run_config
+from services.pipeline_init import create_initial_state, finalize_from_state
 from state import AgentState
 
 # Configure structured logging for Cloud Run
@@ -107,37 +108,30 @@ async def event_generator(query: str):
     queue = asyncio.Queue()
 
     async def run_graph():
+        ctx = None
+        current_state: AgentState | None = None
         try:
             logger.info(f"Received query: {query}")
-            
-            # Instantiate the graph
+
             graph = create_graph()
             app_instance = graph.compile()
-            
-            # Initialize state
-            initial_state: AgentState = {
-                "user_query": query,
-                "research_plan": None,
-                "research_results": None,
-                "critique": None,
-                "final_report": None,
-                "current_node": "planner",
-                "iteration_count": 0,
-                "error": None,
-            }
-            
-            # Configure LangSmith tracing
+
+            initial_state, ctx = await create_initial_state(query)
+            current_state = initial_state
+
             run_config = create_run_config()
-            
-            # We exhaust the generator COMPLETELY here
+
             async for output in app_instance.astream(initial_state, config=run_config):
                 await queue.put(output)
+                node_name = list(output.keys())[0]
+                current_state = {**current_state, **output[node_name]}
             await queue.put("DONE")
         except Exception as e:
             logger.error(f"Graph execution error: {e}")
             await queue.put(f"ERROR: {str(e)}")
         finally:
-            # This ensures LangSmith always gets the 'Success' signal
+            if ctx is not None and current_state is not None:
+                await finalize_from_state(current_state, ctx)
             logger.info("LangGraph internal stream finished.")
 
     # Start the graph as a background task that CANNOT be killed by a disconnect
@@ -187,11 +181,22 @@ async def event_generator(query: str):
                 # Match ResearchResponse structure expected by frontend
                 report_dict = {
                     "query": query,
-                    "report": report.content,  # Frontend expects result.report as string
+                    "report": report.content,
                     "sources": report.sources,
                     "confidence": report.confidence,
                     "iteration_count": node_state.get("iteration_count", 0),
                     "quality_score": quality_score,
+                    "research_run_id": node_state.get("research_run_id"),
+                    "sources_persisted": len(node_state.get("normalized_sources") or []),
+                    "evidence_count": len(node_state.get("validated_evidence") or []),
+                    "evidence_metrics": node_state.get("evidence_metrics"),
+                    "confidence_level": (
+                        node_state.get("final_report").confidence_level
+                        if node_state.get("final_report")
+                        and hasattr(node_state.get("final_report"), "confidence_level")
+                        else None
+                    ),
+                    "report_metrics": node_state.get("report_metrics"),
                     "error": None,
                 }
                 

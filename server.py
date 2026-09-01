@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from graph import create_graph, create_run_config, get_langsmith_trace_url
+from services.pipeline_init import create_initial_state, finalize_from_state
 from state import AgentState, FinalReport
 
 app = FastAPI(
@@ -66,24 +67,13 @@ async def research(request: ResearchRequest) -> ResearchResponse:
     graph = create_graph()
     app_instance = graph.compile()
 
-    # Initialize state
-    initial_state: AgentState = {
-        "user_query": request.query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
+    # Initialize state with research run
+    initial_state, ctx = await create_initial_state(request.query)
 
     try:
-        # Configure LangSmith tracing
         run_config = create_run_config()
-        
-        # Execute graph with LangSmith config
         final_state = await app_instance.ainvoke(initial_state, config=run_config)
+        await finalize_from_state(final_state, ctx)
 
         # Check for errors
         if final_state.get("error"):

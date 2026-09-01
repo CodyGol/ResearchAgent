@@ -200,11 +200,32 @@ class TestStateStructure:
         """Verify AgentState can be initialized with required fields."""
         state: AgentState = {
             "user_query": "Test query",
+            "query_classification": None,
+            "fast_path_metrics": None,
+            "escalate_to_standard": False,
+            "escalated_from_fast_path": False,
+            "escalation_reason": None,
+            "research_run_id": None,
+            "is_run_persisted": False,
+            "normalized_sources": None,
+            "validated_evidence": None,
+            "evidence_metrics": None,
+            "validated_claims": None,
+            "material_claims": None,
+            "claim_evidence_relations": None,
+            "verification_results": None,
+            "verification_metrics": None,
+            "knowledge_state": None,
+            "claim_metrics": None,
+            "source_dedup_metrics": None,
+            "report_metrics": None,
+            "cost_metrics": None,
+            "research_sufficient": False,
             "research_plan": None,
             "research_results": None,
             "critique": None,
             "final_report": None,
-            "current_node": "planner",
+            "current_node": "router",
             "iteration_count": 0,
             "error": None,
         }
@@ -212,7 +233,7 @@ class TestStateStructure:
         # Verify structure
         assert state["user_query"] == "Test query"
         assert state["research_plan"] is None
-        assert state["current_node"] == "planner"
+        assert state["current_node"] == "router"
         assert state["iteration_count"] == 0
 
     def test_research_plan_creation(self):

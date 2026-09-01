@@ -1,82 +1,103 @@
-"""Critic node: Evaluates research quality and decides if refinement is needed."""
+"""Critic node: Evidence-grounded research quality evaluation."""
 
 from langchain_anthropic import ChatAnthropic
 
 from config import settings
+from services.evidence_context import assign_evidence_ids, format_evidence_for_prompt
+from services.query_router import BUDGETS, QueryComplexity, ResearchBudget
+from services.research_sufficiency import check_research_sufficiency
 from state import AgentState, Critique
 from utils.observability import trace_llm_call
 
 
 async def critic_node(state: AgentState) -> AgentState:
     """
-    Critic node: Evaluates research quality and determines if refinement needed.
+    Evidence-grounded Critic: evaluates validated evidence quality.
 
-    Uses Claude 4.5 Sonnet to evaluate research results for:
-    - Freshness (staleness detection)
-    - Bias detection
-    - Completeness
-    - Source diversity
-
-    Args:
-        state: Current agent state
-
-    Returns:
-        Updated state with critique populated and current_node set
-    """
-    results = state.get("research_results")
+    Primary input is validated evidence — NOT raw search result count.
+  """
     plan = state.get("research_plan")
     iteration = state.get("iteration_count", 0)
+    evidence_list = state.get("validated_evidence") or []
+    sources = state.get("normalized_sources") or []
+    evidence_metrics = state.get("evidence_metrics") or {}
+    classification = state.get("query_classification") or {}
+    budget = classification.get("research_budget", {})
+    complexity_str = classification.get("complexity", "standard")
+    try:
+        complexity = QueryComplexity(complexity_str)
+    except ValueError:
+        complexity = QueryComplexity.STANDARD
+    max_iterations = budget.get("max_iterations", settings.max_research_iterations)
 
-    if not results:
-        state["error"] = "Research results not found"
+    if not plan:
+        state["error"] = "Research plan not found"
         state["current_node"] = "end"
         return state
 
-    # Initialize LLM with structured output
+    # Assign stable evidence IDs for downstream traceability
+    evidence_list = assign_evidence_ids(evidence_list)
+    state["validated_evidence"] = evidence_list
+
     llm = ChatAnthropic(
         model=settings.model_name,
         api_key=settings.anthropic_api_key,
-        temperature=0.2,  # Very low temperature for consistent evaluation
+        temperature=0.2,
     )
 
-    # Trace LLM call
-    with trace_llm_call("critic", "evaluate_research_quality") as span:
+    evidence_block = format_evidence_for_prompt(evidence_list, sources)
+    validated_count = len(evidence_list)
+    raw_search_count = state.get("research_results")
+    raw_count = raw_search_count.total_count if raw_search_count else 0
+
+    with trace_llm_call("critic", "evaluate_evidence_quality") as span:
         try:
-            # Prepare research results summary for critique
-            results_summary = "\n\n".join(
-                [
-                    f"Result {i+1}:\nTitle: {r.title}\nURL: {r.url}\nContent: {r.content[:200]}..."
-                    for i, r in enumerate(results.results[:10])  # Limit to first 10
-                ]
-            )
+            system_prompt = """You are an evidence-grounded research quality critic.
 
-            system_prompt = """You are a research quality critic. Your task is to evaluate research results for:
+Your job is to evaluate VALIDATED EVIDENCE — not raw search result volume.
 
-1. **Freshness**: Are the results recent and up-to-date? Check for stale information.
-2. **Bias**: Are there potential biases in the sources or content?
-3. **Completeness**: Does the research cover the query comprehensively?
-4. **Source Diversity**: Are sources from diverse, credible origins?
+Evaluate these dimensions:
 
-Provide a quality score (0-1) and specific issues/recommendations. Be strict but fair."""
+1. **Coverage**: Does the validated evidence address the research question?
+2. **Directness**: Does evidence directly answer the question, or is it tangential?
+3. **Source quality**: Are key facts supported by credible sources?
+4. **Source diversity**: Are we over-relying on one publisher or source family?
+5. **Temporal alignment**: Does evidence match the requested time period?
+6. **Redundancy**: Are multiple items merely repeating the same fact?
+7. **Potential conflicts**: Do evidence items appear to disagree?
+8. **Missing evidence**: What important parts remain unsupported?
 
-            user_prompt = f"""Evaluate these research results for the query: "{plan.query if plan else 'Unknown query'}"
+CRITICAL RULES:
+- 25 search results with 2 useful evidence items is NOT the same as 8 independent high-quality evidence items.
+- Do NOT rate quality highly based on search result count alone.
+- Be strict when evidence is thin, redundant, temporally misaligned, or conflicting.
+- quality_score must reflect EVIDENCE quality, not search breadth."""
 
-Research Results ({results.total_count} total):
-{results_summary}
+            user_prompt = f"""Research question: "{plan.query}"
 
-Provide a critique with:
-- Quality score (0.0 to 1.0)
-- Whether quality is sufficient (threshold: {settings.quality_threshold})
-- List of specific issues found
-- Recommendations for improvement if insufficient"""
+Sub-queries investigated:
+{chr(10).join(f"- {sq}" for sq in plan.sub_queries)}
+
+Evidence extraction metrics:
+- Raw search results retrieved: {raw_count}
+- Validated evidence items: {validated_count}
+- Sources with evidence: {evidence_metrics.get('sources_with_evidence', 0)}
+- Rejected candidates: {evidence_metrics.get('rejected_count', 0)}
+
+VALIDATED EVIDENCE (authoritative factual substrate):
+{evidence_block}
+
+Evaluate evidence quality. Threshold for sufficiency: {settings.quality_threshold}
+
+Provide structured assessment including potential_conflicts and unsupported_areas."""
 
             span.set_input({
-                "query": plan.query if plan else "Unknown",
-                "result_count": results.total_count,
+                "query": plan.query,
+                "validated_evidence_count": validated_count,
+                "raw_search_count": raw_count,
                 "iteration": iteration,
             })
 
-            # Use structured output
             try:
                 structured_llm = llm.with_structured_output(Critique)
                 messages = [
@@ -85,62 +106,76 @@ Provide a critique with:
                 ]
                 critique_result = await structured_llm.ainvoke(messages)
             except Exception:
-                # Fallback: Parse from response
+                import json
+                import re
+
                 response = await llm.ainvoke(
                     [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ]
                 )
-                # Parse critique from response
-                import json
-                import re
-
-                json_match = re.search(r'\{.*\}', response.content, re.DOTALL)
+                json_match = re.search(r"\{.*\}", response.content, re.DOTALL)
                 if json_match:
                     try:
                         critique_data = json.loads(json_match.group())
                         critique_result = Critique(**critique_data)
                     except Exception:
-                        # Fallback: Basic evaluation
-                        critique_result = Critique(
-                            quality_score=0.7,
-                            is_sufficient=True,
-                            issues=[],
-                            recommendations=[],
-                        )
+                        critique_result = _fallback_critique(validated_count)
                 else:
-                    # Fallback: Basic evaluation
-                    critique_result = Critique(
-                        quality_score=0.7,
-                        is_sufficient=True,
-                        issues=[],
-                        recommendations=[],
-                    )
+                    critique_result = _fallback_critique(validated_count)
 
-            # Ensure is_sufficient is set based on quality_threshold
-            critique_result.is_sufficient = (
-                critique_result.quality_score >= settings.quality_threshold
+            # Penalize insufficient evidence deterministically
+            if validated_count == 0:
+                critique_result.quality_score = min(critique_result.quality_score, 0.3)
+                critique_result.is_sufficient = False
+                if "No validated evidence" not in str(critique_result.issues):
+                    critique_result.issues.append("No validated evidence available")
+
+            # Research sufficiency short-circuit for simple/standard questions
+            research_budget = (
+                ResearchBudget(**budget) if budget else BUDGETS[complexity]
             )
+            sufficiency = check_research_sufficiency(
+                plan.query,
+                evidence_list,
+                sources,
+                complexity=complexity,
+                budget=research_budget,
+                potential_conflicts=critique_result.potential_conflicts,
+            )
+
+            if sufficiency.is_sufficient:
+                critique_result.is_sufficient = True
+                critique_result.quality_score = max(
+                    critique_result.quality_score, settings.quality_threshold
+                )
+                state["research_sufficient"] = True
+                cost = state.get("cost_metrics") or {}
+                cost["short_circuited"] = True
+                cost["short_circuit_reason"] = sufficiency.reason
+                state["cost_metrics"] = cost
+            else:
+                critique_result.is_sufficient = (
+                    critique_result.quality_score >= settings.quality_threshold
+                    and validated_count > 0
+                )
 
             span.set_output({
                 "critique": critique_result.model_dump(),
+                "sufficiency": sufficiency.reason,
             })
-
             state["critique"] = critique_result
 
-            # Check iteration limit (Rule 2: Prevent infinite loops)
-            if not critique_result.is_sufficient and iteration >= settings.max_research_iterations:
-                # Force proceed to writer even if quality is low
+            if not critique_result.is_sufficient and iteration >= max_iterations:
                 state["current_node"] = "writer"
                 return state
 
-            # Decision: loop back to researcher or proceed to writer
             if critique_result.is_sufficient:
                 state["current_node"] = "writer"
             else:
                 state["iteration_count"] = iteration + 1
-                state["current_node"] = "researcher"  # Recursive loop
+                state["current_node"] = "researcher"
 
             return state
 
@@ -149,3 +184,15 @@ Provide a critique with:
             state["error"] = f"Critic failed: {str(e)}"
             state["current_node"] = "end"
             return state
+
+
+def _fallback_critique(validated_count: int) -> Critique:
+    """Conservative fallback when structured output fails."""
+    score = 0.6 if validated_count >= 3 else 0.4 if validated_count >= 1 else 0.2
+    return Critique(
+        quality_score=score,
+        is_sufficient=score >= settings.quality_threshold and validated_count > 0,
+        coverage="Unable to fully assess — structured critique failed",
+        issues=["Structured critique output failed; using conservative fallback"],
+        recommendations=[],
+    )

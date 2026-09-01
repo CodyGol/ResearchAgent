@@ -13,6 +13,7 @@ from tabulate import tabulate
 
 from config import settings
 from graph import create_graph, create_run_config, get_langsmith_trace_url
+from services.pipeline_init import create_initial_state, finalize_from_state
 from state import AgentState
 
 
@@ -98,18 +99,11 @@ async def run_agent_query(
                 ],
             )
             
-            initial_state: AgentState = {
-                "user_query": query,
-                "research_plan": None,
-                "research_results": None,
-                "critique": None,
-                "final_report": None,
-                "current_node": "planner",
-                "iteration_count": 0,
-                "error": None,
-            }
+            initial_state, ctx = await create_initial_state(query)
             
             final_state = await app.ainvoke(initial_state, config=eval_config)
+            
+            await finalize_from_state(final_state, ctx)
             
             latency = time.time() - start_time
             

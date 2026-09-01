@@ -31,6 +31,9 @@ class ResearchReportRecord(BaseModel):
     iteration_count: int = Field(
         default=0, ge=0, description="Number of research-critic cycles"
     )
+    research_run_id: int | None = Field(
+        None, description="Linked evidence foundation research run"
+    )
     created_at: datetime = Field(default_factory=datetime.utcnow)
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional metadata"

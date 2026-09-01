@@ -110,6 +110,7 @@ class ResearchReportRepository:
         report: FinalReport,
         quality_score: float | None = None,
         iteration_count: int = 0,
+        research_run_id: int | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> int:
         """
@@ -132,6 +133,7 @@ class ResearchReportRepository:
             confidence=report.confidence,
             quality_score=quality_score,
             iteration_count=iteration_count,
+            research_run_id=research_run_id if research_run_id and research_run_id > 0 else None,
             metadata=metadata or {},
         )
 

@@ -4,6 +4,7 @@ import asyncio
 import sys
 
 from graph import create_graph, create_run_config, get_langsmith_trace_url
+from services.pipeline_init import create_initial_state, finalize_from_state
 from state import AgentState
 
 
@@ -25,24 +26,18 @@ async def run_research(query: str):
     if trace_url:
         print(f"🛠️  View Trace: {trace_url}\n")
 
-    # Initialize state
-    initial_state: AgentState = {
-        "user_query": query,
-        "research_plan": None,
-        "research_results": None,
-        "critique": None,
-        "final_report": None,
-        "current_node": "planner",
-        "iteration_count": 0,
-        "error": None,
-    }
+    # Initialize state with research run
+    initial_state, ctx = await create_initial_state(query)
 
     print("🚀 Starting The Oracle...")
     print(f"Query: {query}\n")
+    print(f"Research Run ID: {initial_state['research_run_id']}\n")
     print("=" * 80)
 
     # Execute graph with LangSmith config
     final_state = await app.ainvoke(initial_state, config=run_config)
+
+    await finalize_from_state(final_state, ctx)
 
     # Display results
     print("\n" + "=" * 80)

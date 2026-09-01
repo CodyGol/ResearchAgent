@@ -72,3 +72,7 @@ $$ LANGUAGE plpgsql;
 
 -- Optional: Schedule cleanup (requires pg_cron extension)
 -- SELECT cron.schedule('cleanup-expired-plans', '0 2 * * *', 'SELECT cleanup_expired_plans()');
+
+-- Evidence Foundation (Migration 001)
+-- For new installations, also run: db/migrations/001_evidence_foundation.sql
+-- This adds: research_runs, sources, evidence, claims, claim_evidence, verifications

@@ -1,134 +1,231 @@
-"""Writer node: Synthesizes final report from research results."""
+"""Writer node: Evidence-grounded report synthesis."""
+
+import logging
 
 from langchain_anthropic import ChatAnthropic
 
 from config import settings
+from services.answer_confidence import compute_confidence_assessment
+from services.evidence_context import (
+    assign_evidence_ids,
+    evidence_ids_to_urls,
+    extract_cited_evidence_ids,
+    format_evidence_for_prompt,
+)
+from services.query_router import QueryComplexity
+from services.report_consistency import run_consistency_checks
+from services.writer_schemas import EvidenceGroundedWriterOutput
 from state import AgentState, FinalReport
 from utils.observability import trace_llm_call
+
+logger = logging.getLogger(__name__)
+
+
+_WRITER_SYSTEM_PROMPT = """You are an evidence-grounded research report writer.
+
+VALIDATED EVIDENCE is your ONLY authoritative factual substrate.
+
+RULES:
+1. Every material factual statement MUST be supportable by the supplied evidence items.
+2. Cite evidence using [E#] references inline (e.g. "Max Verstappen won the championship [E3][E7].").
+3. Do NOT introduce facts, statistics, dates, or counts not grounded in the evidence.
+4. Do NOT use raw search snippets — only validated evidence is provided.
+5. Distinguish clearly:
+   - Evidence-backed facts (cite with [E#])
+   - Synthesis (combining multiple cited facts)
+   - Interpretation (label as "Analysis:" or "Interpretation:" — never present as established fact)
+6. Match report depth to question complexity:
+   - Simple factual questions → short, direct answer (may be 1-3 paragraphs)
+   - Complex research questions → longer structured report
+7. Do NOT pad with unsupported detail to appear comprehensive.
+8. If evidence is insufficient for a detail, omit it or state the gap explicitly.
+9. List all evidence IDs you cite in evidence_ids_used.
+
+You will NOT assign confidence — that is computed separately."""
 
 
 async def writer_node(state: AgentState) -> AgentState:
     """
-    Writer node: Synthesizes final report from approved research.
+    Synthesize report from validated evidence only.
 
-    Uses Claude 4.5 Sonnet to synthesize a comprehensive report from research results.
-
-    Args:
-        state: Current agent state
-
-    Returns:
-        Updated state with final_report populated
+    Raw search results are NOT passed to the LLM.
     """
     plan = state.get("research_plan")
-    results = state.get("research_results")
     critique = state.get("critique")
+    evidence_list = assign_evidence_ids(state.get("validated_evidence") or [])
+    sources = state.get("normalized_sources") or []
+    evidence_metrics = state.get("evidence_metrics") or {}
 
-    if not plan or not results:
-        state["error"] = "Missing research plan or results"
+    if not plan:
+        state["error"] = "Missing research plan"
         state["current_node"] = "end"
         return state
 
-    # Initialize LLM
+    if not evidence_list:
+        state["error"] = "No validated evidence available for report generation"
+        state["current_node"] = "end"
+        return state
+
+    state["validated_evidence"] = evidence_list
+
     llm = ChatAnthropic(
         model=settings.model_name,
         api_key=settings.anthropic_api_key,
-        temperature=0.7,  # Higher temperature for more creative synthesis
+        temperature=0.3,
     )
 
-    # Trace LLM call
-    with trace_llm_call("writer", "synthesize_report") as span:
+    evidence_block = format_evidence_for_prompt(evidence_list, sources)
+
+    critique_block = ""
+    if critique:
+        critique_block = f"""
+Critic assessment:
+- Quality score: {critique.quality_score}
+- Coverage: {critique.coverage}
+- Source quality: {critique.source_quality}
+- Source diversity: {critique.source_diversity}
+- Temporal alignment: {critique.temporal_alignment}
+- Potential conflicts: {', '.join(critique.potential_conflicts) or 'None identified'}
+- Unsupported areas: {', '.join(critique.unsupported_areas) or 'None identified'}
+- Issues: {', '.join(critique.issues) or 'None'}
+"""
+
+    with trace_llm_call("writer", "synthesize_evidence_grounded_report") as span:
         try:
-            # Prepare full research content for synthesis
-            research_content = "\n\n---\n\n".join(
-                [
-                    f"## Source {i+1}: {r.title}\nURL: {r.url}\n\n{r.content}"
-                    for i, r in enumerate(results.results)
-                ]
-            )
+            user_prompt = f"""Research question: {plan.query}
 
-            system_prompt = """You are an expert research synthesizer. Your task is to create a comprehensive, well-structured research report from multiple sources.
+{critique_block}
 
-The report should:
-1. Be clear and well-organized with proper headings
-2. Synthesize information from all sources (don't just list them)
-3. Cite sources using their URLs
-4. Highlight key findings and insights
-5. Be objective and balanced
-6. Include a confidence assessment based on source quality and coverage
+VALIDATED EVIDENCE (your only factual source):
+{evidence_block}
 
-Format the report in Markdown."""
-
-            user_prompt = f"""Synthesize a comprehensive research report from these sources:
-
-**Research Query:** {plan.query}
-
-**Sub-queries Investigated:**
-{chr(10).join(f"- {sq}" for sq in plan.sub_queries)}
-
-**Research Sources:**
-{research_content}
-
-Create a well-structured report that synthesizes this information. Include:
-- Executive summary
-- Key findings
-- Detailed analysis
-- Source citations
-- Confidence assessment (0.0 to 1.0)
-
-Format as Markdown."""
+Write an evidence-grounded report. Use [E#] citations for every material fact.
+Keep length appropriate to the question — do not over-generate."""
 
             span.set_input({
                 "query": plan.query,
-                "source_count": results.total_count,
+                "evidence_count": len(evidence_list),
                 "quality_score": critique.quality_score if critique else None,
             })
 
-            # Use structured output
+            writer_output: EvidenceGroundedWriterOutput
             try:
-                structured_llm = llm.with_structured_output(FinalReport)
-                messages = [
-                    {"role": "system", "content": system_prompt},
+                structured_llm = llm.with_structured_output(EvidenceGroundedWriterOutput)
+                writer_output = await structured_llm.ainvoke([
+                    {"role": "system", "content": _WRITER_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt},
-                ]
-                report_result = await structured_llm.ainvoke(messages)
+                ])
             except Exception:
-                # Fallback: Generate content and extract
-                response = await llm.ainvoke(
-                    [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ]
+                response = await llm.ainvoke([
+                    {"role": "system", "content": _WRITER_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ])
+                content = response.content if hasattr(response, "content") else str(response)
+                cited = extract_cited_evidence_ids(content)
+                writer_output = EvidenceGroundedWriterOutput(
+                    content=content,
+                    evidence_ids_used=[f"E{i}" for i in cited] if cited else [],
+                    factual_summary="",
                 )
 
-                # Extract sources from content
-                sources = list(set(result.url for result in results.results))
+            # Resolve citations from evidence IDs
+            cited_ids = writer_output.evidence_ids_used or extract_cited_evidence_ids(
+                writer_output.content
+            )
+            # Normalize to numeric strings
+            cited_numeric = []
+            for eid in cited_ids:
+                eid_clean = eid.replace("E", "").strip()
+                if eid_clean.isdigit():
+                    cited_numeric.append(eid_clean)
+            if not cited_numeric:
+                cited_numeric = extract_cited_evidence_ids(writer_output.content)
 
-                # Try to extract confidence from response if mentioned
-                import re
+            citation_urls = evidence_ids_to_urls(cited_numeric, evidence_list, sources)
 
-                confidence_match = re.search(
-                    r'confidence[:\s]+([0-9.]+)', response.content, re.IGNORECASE
-                )
-                confidence = (
-                    float(confidence_match.group(1))
-                    if confidence_match
-                    else (critique.quality_score if critique else 0.8)
-                )
+            # Consistency check
+            evidence_texts = [ev.exact_text for ev in evidence_list]
+            consistency = run_consistency_checks(writer_output.content, evidence_texts)
 
-                report_result = FinalReport(
-                    content=response.content,
-                    sources=sources,
-                    confidence=min(max(confidence, 0.0), 1.0),  # Clamp to [0, 1]
+            report_content = writer_output.content
+            if consistency.issues:
+                logger.warning(
+                    "Report consistency issues detected: %s", consistency.issues
                 )
+                # Append note about detected issues (do not silently ignore)
+                issues_note = "\n\n---\n*Note: The following consistency concerns were detected in this report: "
+                issues_note += "; ".join(consistency.issues)
+                issues_note += ". Details should be verified against cited evidence.*"
+                report_content += issues_note
+
+            # Separated confidence: answer support vs research completeness
+            classification = state.get("query_classification") or {}
+            complexity_str = classification.get("complexity", "standard")
+            try:
+                complexity = QueryComplexity(complexity_str)
+            except ValueError:
+                complexity = QueryComplexity.STANDARD
+
+            confidence_assessment = compute_confidence_assessment(
+                plan.query,
+                evidence_list,
+                sources,
+                complexity=complexity,
+                potential_conflicts=critique.potential_conflicts if critique else None,
+                consistency_issues=consistency.issues,
+            )
+
+            # Legacy confidence field uses answer confidence
+            confidence_level = confidence_assessment.answer_confidence
+            confidence_numeric = confidence_assessment.answer_confidence_numeric
+            confidence_reasoning = confidence_assessment.answer_reasoning
+
+            all_evidence_ids = [ev.metadata.get("display_id", "") for ev in evidence_list]
+            used_set = {f"E{i}" for i in cited_numeric}
+            unused = [eid for eid in all_evidence_ids if eid and eid not in used_set]
+
+            report_metrics = {
+                "validated_evidence_count": len(evidence_list),
+                "evidence_used_count": len(cited_numeric),
+                "evidence_unused_count": len(unused),
+                "citation_count": len(citation_urls),
+                "consistency_issues": consistency.issues,
+                "consistency_warnings": consistency.warnings,
+                "confidence_level": confidence_level.value,
+                "confidence_reasoning": confidence_reasoning,
+                "answer_confidence_level": confidence_assessment.answer_confidence.value,
+                "answer_confidence_reasoning": confidence_assessment.answer_reasoning,
+                "research_completeness_level": confidence_assessment.research_completeness.value,
+                "research_completeness_reasoning": confidence_assessment.completeness_reasoning,
+                "source_dedup_metrics": state.get("source_dedup_metrics"),
+                "evidence_metrics": evidence_metrics,
+                "claim_metrics": state.get("claim_metrics"),
+                "cost_metrics": state.get("cost_metrics"),
+            }
+
+            report_result = FinalReport(
+                content=report_content,
+                sources=citation_urls,
+                confidence=confidence_numeric,
+                confidence_level=confidence_level.value,
+                confidence_reasoning=confidence_reasoning,
+                answer_confidence_level=confidence_assessment.answer_confidence.value,
+                answer_confidence_reasoning=confidence_assessment.answer_reasoning,
+                research_completeness_level=confidence_assessment.research_completeness.value,
+                research_completeness_reasoning=confidence_assessment.completeness_reasoning,
+                evidence_ids_used=[f"E{i}" for i in cited_numeric],
+                report_metrics=report_metrics,
+            )
 
             span.set_output({
                 "report_length": len(report_result.content),
-                "source_count": len(report_result.sources),
-                "confidence": report_result.confidence,
+                "citation_count": len(citation_urls),
+                "confidence_level": confidence_level.value,
+                "consistency_issues": len(consistency.issues),
             })
 
-            # Save to database (Supabase integration)
-            # Note: Reports are always saved if Supabase is configured (not gated by ENABLE_CACHING)
+            state["report_metrics"] = report_metrics
+
             if settings.supabase_url and settings.supabase_key:
                 try:
                     from db.repository import _get_report_repo
@@ -139,21 +236,19 @@ Format as Markdown."""
                         report=report_result,
                         quality_score=critique.quality_score if critique else None,
                         iteration_count=state.get("iteration_count", 0),
+                        research_run_id=state.get("research_run_id"),
                         metadata={
                             "sub_queries": plan.sub_queries,
-                            "search_terms": plan.search_terms,
-                            "total_sources": len(report_result.sources),
+                            "confidence_level": confidence_level.value,
+                            "confidence_reasoning": confidence_reasoning,
+                            "evidence_ids_used": report_result.evidence_ids_used,
+                            "report_metrics": report_metrics,
                         },
                     )
-                    # Update output with report_id
                     existing_output = span.output_data or {}
-                    span.set_output({
-                        **existing_output,
-                        "report_id": report_id,
-                    })
+                    span.set_output({**existing_output, "report_id": report_id})
                     print(f"✅ Report saved to Supabase (ID: {report_id})")
                 except Exception as e:
-                    # Database save failure is logged but doesn't block execution
                     import traceback
                     print(f"❌ Failed to save report to database: {e}")
                     print(f"   Error details: {traceback.format_exc()}")

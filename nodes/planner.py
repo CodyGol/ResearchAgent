@@ -35,6 +35,9 @@ async def planner_node(state: AgentState) -> AgentState:
         Updated state with research_plan populated
     """
     query = state["user_query"]
+    classification = state.get("query_classification") or {}
+    budget = classification.get("research_budget", {})
+    complexity = classification.get("complexity", "standard")
 
     # Check cache first (Supabase integration)
     try:
@@ -105,13 +108,26 @@ Your mission:
 You DESPISE SEO blogs. You CRAVE DATA, BENCHMARKS, and OFFICIAL DOCUMENTATION.
 The "domains" and "required_domains" fields are your PRIMARY weapons against content spam."""
 
+            # Adjust plan size based on complexity
+            max_queries = budget.get("max_search_queries", 3)
+            if complexity == "simple":
+                plan_hint = f"""This is a SIMPLE factual question. Generate at most {max_queries} focused sub-query.
+Target authoritative sources. Do not over-decompose."""
+            elif complexity == "deep":
+                plan_hint = f"""This is a DEEP research question. Generate up to {max_queries} thorough sub-queries.
+Cover multiple angles and perspectives."""
+            else:
+                plan_hint = f"""Generate up to {max_queries} targeted sub-queries."""
+
             user_prompt = f"""Analyze this research query and create a structured plan targeting PRIMARY SOURCES:
 
 Query: {query}
+Complexity: {complexity.upper()}
+{plan_hint}
 
 Generate:
-1. Sub-queries with site: and filetype: filters (e.g., "AI architecture site:arxiv.org filetype:pdf")
-2. Enhanced search terms with modifiers (not just keywords)
+1. Sub-queries (respect max: {max_queries})
+2. Enhanced search terms with modifiers
 3. Domain filters for technical queries
 4. Required domains for academic queries (if applicable)
 
@@ -156,6 +172,12 @@ Remember: You are a Senior Technical Researcher. Prioritize official docs, acade
                 else:
                     # No JSON found, use fallback
                     plan_result = _create_fallback_plan(query)
+
+            # Trim sub-queries to budget
+            if plan_result.sub_queries and max_queries:
+                plan_result = plan_result.model_copy(
+                    update={"sub_queries": plan_result.sub_queries[:max_queries]}
+                )
 
             span.set_output({
                 "plan": plan_result.model_dump(),
