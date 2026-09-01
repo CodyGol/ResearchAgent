@@ -77,7 +77,7 @@ def _vendor_frame() -> DecisionFrame:
             DecisionOption(label="Anthropic", origin="explicit"),
         ],
         criteria=[
-            DecisionCriterion(label="Cost", origin="explicit"),
+            DecisionCriterion(label="Cost", origin="explicit", priority="primary"),
             DecisionCriterion(label="Enterprise readiness", origin="inferred"),
         ],
     )
@@ -374,9 +374,39 @@ class TestProvenanceAndLineage:
         crit = opt.criteria_evaluations[0]
         assert opt.option_origin == "explicit"
         assert crit.criterion_origin == "explicit"
+        assert crit.criterion_priority == "primary"
         assert crit.verification_ids == [101]
         assert crit.knowledge_categories == ["known"]
         assert crit.knowledge_coverage == KnowledgeCoverage.GROUNDED
+
+    def test_criterion_priority_copied_from_frame_not_llm(self):
+        frame = DecisionFrame(
+            decision="Which vendor",
+            decision_type=DecisionType.VENDOR_SELECTION,
+            options=[DecisionOption(label="Vendor A", origin="explicit")],
+            criteria=[
+                DecisionCriterion(label="Cost", origin="explicit", priority="primary"),
+            ],
+        )
+        catalog = build_claim_catalog(
+            _knowledge_state(known=[_entry(1)]),
+            [_claim(1, "Low cost")],
+        )
+        llm_out = OptionEvaluationLLMOutput(
+            evaluations=[
+                CriterionEvaluationLLM(
+                    option_label="Vendor A",
+                    criterion_label="Cost",
+                    assessment=CriterionAssessment.FAVORABLE,
+                    claim_ids=[1],
+                    reason="Cost is favorable.",
+                ),
+            ]
+        )
+        evaluation, _ = validate_and_build_evaluation(llm_out, frame, catalog)
+        assert evaluation is not None
+        row = evaluation.option_evaluations[0].criteria_evaluations[0]
+        assert row.criterion_priority == "primary"
 
     def test_invalid_claim_ids_stripped(self):
         frame = _vendor_frame()

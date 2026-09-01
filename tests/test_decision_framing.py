@@ -35,7 +35,7 @@ def _vendor_cost_fixture() -> DecisionFramingResult:
                 DecisionOption(label="Anthropic", origin="explicit"),
             ],
             criteria=[
-                DecisionCriterion(label="Cost", origin="explicit"),
+                DecisionCriterion(label="Cost", origin="explicit", priority="primary"),
                 DecisionCriterion(label="Enterprise readiness", origin="inferred"),
                 DecisionCriterion(label="Integration complexity", origin="inferred"),
             ],
@@ -128,6 +128,9 @@ class TestProvenance:
         explicit_criteria = [c for c in frame.criteria if c.origin == "explicit"]
         inferred_criteria = [c for c in frame.criteria if c.origin == "inferred"]
         assert any(c.label == "Cost" for c in explicit_criteria)
+        cost = next(c for c in frame.criteria if c.label == "Cost")
+        assert cost.priority == "primary"
+        assert all(c.priority == "standard" for c in inferred_criteria)
         assert len(inferred_criteria) >= 1
         assert metrics.explicit_criterion_count == 1
         assert metrics.inferred_criterion_count >= 1
@@ -153,6 +156,65 @@ class TestProvenance:
         assert frame is not None
         cost = next(c for c in frame.criteria if c.label == "Cost")
         assert cost.origin == "explicit"
+
+
+class TestCriterionPriority:
+    @pytest.mark.asyncio
+    async def test_cost_most_important_is_primary(self):
+        frame, _ = await frame_decision_query(
+            "Should we use OpenAI or Anthropic? Cost is our most important consideration.",
+            llm=_mock_llm(_vendor_cost_fixture()),
+        )
+        assert frame is not None
+        cost = next(c for c in frame.criteria if c.label == "Cost")
+        assert cost.origin == "explicit"
+        assert cost.priority == "primary"
+        assert all(c.priority == "standard" for c in frame.criteria if c.origin == "inferred")
+
+    @pytest.mark.asyncio
+    async def test_compare_without_priority_both_standard(self):
+        fixture = DecisionFramingResult(
+            decision_oriented=True,
+            decision_frame=DecisionFrame(
+                decision="Which LLM provider to use",
+                decision_type=DecisionType.VENDOR_SELECTION,
+                options=[
+                    DecisionOption(label="OpenAI", origin="explicit"),
+                    DecisionOption(label="Anthropic", origin="explicit"),
+                ],
+                criteria=[
+                    DecisionCriterion(label="Cost", origin="explicit"),
+                    DecisionCriterion(label="Reliability", origin="explicit"),
+                ],
+            ),
+        )
+        frame, _ = await frame_decision_query(
+            "Compare them on cost and reliability.",
+            llm=_mock_llm(fixture),
+        )
+        assert frame is not None
+        for crit in frame.criteria:
+            assert crit.origin == "explicit"
+            assert crit.priority == "standard"
+
+    def test_inferred_primary_forced_to_standard(self):
+        result = DecisionFramingResult(
+            decision_oriented=True,
+            decision_frame=DecisionFrame(
+                decision="Whether to enter Market X",
+                decision_type=DecisionType.MARKET_ENTRY,
+                criteria=[
+                    DecisionCriterion(
+                        label="Strategic fit",
+                        origin="inferred",
+                        priority="primary",
+                    ),
+                ],
+            ),
+        )
+        frame = _validate_frame(result)
+        assert frame is not None
+        assert frame.criteria[0].priority == "standard"
 
 
 class TestScenarios:

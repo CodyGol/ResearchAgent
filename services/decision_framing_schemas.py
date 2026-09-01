@@ -31,6 +31,13 @@ class DecisionCriterion(BaseModel):
 
     label: str = Field(..., min_length=1)
     origin: Literal["explicit", "inferred"]
+    priority: Literal["primary", "standard"] = Field(
+        default="standard",
+        description=(
+            "primary only when the user explicitly stated this criterion is the "
+            "top/most important consideration; standard otherwise"
+        ),
+    )
 
 
 class DecisionFrame(BaseModel):

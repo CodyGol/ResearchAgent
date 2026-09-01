@@ -122,7 +122,9 @@ def format_claim_catalog(catalog: dict[int, ClaimCatalogEntry]) -> str:
 
 def format_decision_frame_for_prompt(frame: DecisionFrame) -> str:
     options = "\n".join(f"- {o.label} (origin={o.origin})" for o in frame.options)
-    criteria = "\n".join(f"- {c.label} (origin={c.origin})" for c in frame.criteria)
+    criteria = "\n".join(
+        f"- {c.label} (origin={c.origin}, priority={c.priority})" for c in frame.criteria
+    )
     return (
         f"Decision: {frame.decision}\n"
         f"Type: {frame.decision_type.value}\n"
@@ -216,8 +218,10 @@ def _frame_option_map(frame: DecisionFrame) -> dict[str, tuple[str, str]]:
     return {_normalize_label(o.label): (o.label, o.origin) for o in frame.options}
 
 
-def _frame_criterion_map(frame: DecisionFrame) -> dict[str, tuple[str, str]]:
-    return {_normalize_label(c.label): (c.label, c.origin) for c in frame.criteria}
+def _frame_criterion_map(frame: DecisionFrame) -> dict[str, tuple[str, str, str]]:
+    return {
+        _normalize_label(c.label): (c.label, c.origin, c.priority) for c in frame.criteria
+    }
 
 
 def validate_and_build_evaluation(
@@ -255,7 +259,7 @@ def validate_and_build_evaluation(
             continue
 
         opt_label, opt_origin = option_map[opt_key]
-        crit_label, crit_origin = criterion_map[crit_key]
+        crit_label, crit_origin, crit_priority = criterion_map[crit_key]
 
         valid_claim_ids: list[int] = []
         for cid in row.claim_ids:
@@ -278,6 +282,7 @@ def validate_and_build_evaluation(
             CriterionEvaluation(
                 criterion_label=crit_label,
                 criterion_origin=crit_origin,
+                criterion_priority=crit_priority,
                 assessment=assessment,
                 knowledge_coverage=coverage,
                 claim_ids=valid_claim_ids,

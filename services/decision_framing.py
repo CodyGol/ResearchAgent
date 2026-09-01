@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from services.decision_framing_schemas import (
+    DecisionCriterion,
     DecisionFrame,
     DecisionFramingMetrics,
     DecisionFramingResult,
@@ -37,10 +38,13 @@ RULES FOR decision_frame WHEN decision_oriented=true:
    - origin="implied" ONLY for minimal binary defaults clearly required by the decision (e.g. "acquire Company X" → "Do not acquire Company X" as implied).
    - Do NOT invent extra strategic alternatives or third vendors.
 
-3. criteria — each criterion has label and origin:
+3. criteria — each criterion has label, origin, and priority:
    - origin="explicit" ONLY when the user stated that dimension matters (e.g. "cost is our most important consideration" → Cost).
    - origin="inferred" for reasonable high-level evaluation dimensions the user did not name (e.g. risk, strategic fit).
-   - Do NOT score, rank, or weight criteria.
+   - priority="primary" ONLY when the user explicitly stated that criterion is the top / most important / primary consideration (e.g. "cost is our most important consideration" → Cost with priority primary).
+   - priority="standard" when no explicit priority language was supplied, including when multiple criteria are mentioned without clear ranking (e.g. "compare on cost and reliability" → both explicit, both standard).
+   - inferred criteria must always have priority="standard".
+   - Do NOT score, rank, or weight criteria numerically.
 
 4. constraints — list of strings, EXPLICIT USER REQUIREMENTS ONLY.
    - Include only hard limits the user stated (budget caps, must integrate with X, geography).
@@ -88,6 +92,17 @@ def _sanitize_time_horizon(value: str | None) -> str | None:
     return stripped
 
 
+def _sanitize_criteria(criteria: list[DecisionCriterion]) -> list[DecisionCriterion]:
+    """Inferred criteria cannot carry explicit-user priority."""
+    sanitized: list[DecisionCriterion] = []
+    for crit in criteria:
+        priority = crit.priority
+        if crit.origin == "inferred":
+            priority = "standard"
+        sanitized.append(crit.model_copy(update={"priority": priority}))
+    return sanitized
+
+
 def _validate_frame(result: DecisionFramingResult) -> DecisionFrame | None:
     """Fail open on invalid frames."""
     if not result.decision_oriented:
@@ -99,7 +114,7 @@ def _validate_frame(result: DecisionFramingResult) -> DecisionFrame | None:
         return None
 
     options = [opt for opt in frame.options if opt.label.strip()]
-    criteria = [crit for crit in frame.criteria if crit.label.strip()]
+    criteria = _sanitize_criteria([crit for crit in frame.criteria if crit.label.strip()])
 
     return DecisionFrame(
         decision=frame.decision.strip(),

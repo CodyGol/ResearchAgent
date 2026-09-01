@@ -27,6 +27,7 @@ class CriterionEvaluation(BaseModel):
 
     criterion_label: str
     criterion_origin: Literal["explicit", "inferred"]
+    criterion_priority: Literal["primary", "standard"] = "standard"
     assessment: CriterionAssessment
     knowledge_coverage: KnowledgeCoverage
     claim_ids: list[int] = Field(default_factory=list)
