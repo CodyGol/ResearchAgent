@@ -1,10 +1,10 @@
 # ResearchAgentv2 — Roadmap
 
-This document separates **implemented** capabilities from **planned** work. Only items under *Implemented* exist in the codebase today.
+This document separates **implemented** capabilities from **future** work. Only items under *Implemented* exist in the codebase today.
 
 ---
 
-## Implemented: Phase 1–2D Research Foundation
+## Implemented: Research Intelligence
 
 | Phase | Capability | Status |
 |-------|------------|--------|
@@ -17,36 +17,44 @@ This document separates **implemented** capabilities from **planned** work. Only
 | **2C** | Cross-source claim verification | ✅ |
 | **2D** | Deterministic Knowledge State (final Critic exit only) | ✅ |
 
-See [architecture.md](architecture.md) for the current graph and data flow.
+---
+
+## Implemented: Decision Intelligence
+
+| Phase | Capability | Status |
+|-------|------------|--------|
+| **3A** | Decision Framing — `DecisionFrame` from query + research context | ✅ |
+| **3B** | Option Evaluation — evidence-grounded option×criterion matrix | ✅ |
+| **3C** | Decision Synthesis — recommendation status, constraints, change conditions | ✅ |
+
+The core Decision Intelligence architecture through Phase 3 is **frozen**. See [architecture.md](architecture.md) for graph, schemas, and invariants.
 
 ---
 
-## Next: Phase 3 — Decision Intelligence
+## Future / Productization (Not Implemented)
 
-**Not implemented.** Potential sequence:
+These are potential directions, not committed phases:
 
-1. **Decision Framing** — structure the decision context from research outputs
-2. **Option Evaluation** — compare alternatives against verified claims and knowledge state
-3. **Recommendation / what would change the recommendation** — explicit sensitivity to new evidence
+- **User-facing Decision Brief** — Writer integration so the final report presents structured recommendations
+- **Persistent monitored decisions** — decision workspace across runs
+- **Change detection** — what changed since last evaluation
+- **Re-evaluation** — automatic refresh when new evidence arrives
+- **Decision history** — audit trail of framing, evaluation, and synthesis over time
+- **Action / operator layer** — automated follow-up research, notifications, execution
 
-Prerequisites likely include Writer integration of verification and Knowledge State (not yet done).
-
----
-
-## Future (Not Planned in Detail)
+Also not implemented:
 
 - Monitoring and alerting on research runs
-- Change detection across runs (“what changed since last time”)
-- Decision re-evaluation when new evidence arrives
-- Action / operator layer (automated follow-up research, notifications)
+- Planner / research guided by `DecisionFrame`
+- Numerical utility, weights, or scoring systems
+- Full evidence/claim caching system (plan cache only today)
+- Fast-path Knowledge State compatibility
+- UI redesign for knowledge buckets or decision artifacts
 
 ---
 
 ## Explicitly Out of Scope (Today)
 
-- Decision Engine
-- Assumptions / risks / option analysis as first-class objects
 - Graph database for claim networks
-- Full evidence/claim caching system
-- Fast-path Knowledge State compatibility
-- UI redesign for knowledge buckets
+- Pseudo-options when `DecisionFrame` has no concrete options (3B skips evaluation instead)
+- Upgrading `tentative_recommendation` → `recommend` via validators (validators may preserve or downgrade only)

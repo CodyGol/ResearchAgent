@@ -136,7 +136,7 @@ Test your configuration:
 # Test Supabase connection (if configured)
 uv run python test_supabase.py
 
-# Run unit tests (178 tests, no live LLM for core logic)
+# Run unit tests (244 tests, no live LLM for core logic)
 uv run pytest
 
 # Run The Oracle CLI

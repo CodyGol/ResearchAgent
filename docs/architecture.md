@@ -1,6 +1,6 @@
-# ResearchAgentv2 — System Architecture (Phase 2D)
+# ResearchAgentv2 — System Architecture (Phase 3C)
 
-This document describes the **implemented** architecture through Phase 2D (Knowledge State). Items in [docs/roadmap.md](roadmap.md) are not implemented unless explicitly marked here.
+This document describes the **implemented** architecture through Phase 3C (Decision Synthesis). Items in [docs/roadmap.md](roadmap.md) under *Future* are not implemented unless explicitly marked here.
 
 ## High-Level System
 
@@ -37,11 +37,12 @@ flowchart TD
     START([User Query]) --> ROUTER[Router]
 
     ROUTER -->|SIMPLE_FACT| FAST[Fast Path]
-    ROUTER -->|STANDARD / DEEP| PLANNER[Planner]
+    ROUTER -->|STANDARD / DEEP| FRAMER[Decision Framer]
 
     FAST -->|success| END1([END])
-    FAST -->|escalate| PLANNER
+    FAST -->|escalate| FRAMER
 
+    FRAMER --> PLANNER[Planner]
     PLANNER --> RESEARCHER[Researcher]
     RESEARCHER --> EVIDENCE[Evidence Extractor]
     EVIDENCE --> CLAIMS[Claim Extractor]
@@ -50,8 +51,17 @@ flowchart TD
 
     CRITIC -->|insufficient and under iteration budget| RESEARCHER
     CRITIC -->|sufficient or max iterations| KS[Knowledge State]
-    KS --> WRITER[Writer]
-    WRITER --> END2([END])
+
+    KS -->|no decision_frame| WRITER1[Writer]
+    KS -->|decision_frame present| OE[Option Evaluator]
+
+    OE -->|options empty| WRITER2[Writer]
+    OE -->|options present| DS[Decision Synthesizer]
+
+    DS --> WRITER3[Writer]
+    WRITER1 --> END2([END])
+    WRITER2 --> END2
+    WRITER3 --> END2
 ```
 
 ### Route: SIMPLE_FACT (frozen)
@@ -63,11 +73,11 @@ Question → Fact Target → Targeted Search → Decisive Evidence
        → Structured Fact Value → Validation → Canonical Claim → Concise Answer
 ```
 
-Implemented in `services/fast_path.py`, `services/fact_target.py`, `services/fact_value.py`, `nodes/fast_path.py`. On failure, escalates to the STANDARD/DEEP path at Planner.
+Implemented in `services/fast_path.py`, `services/fact_target.py`, `services/fact_value.py`, `nodes/fast_path.py`. On failure, escalates to the STANDARD/DEEP path at **Decision Framer** (not Planner directly).
 
 ### Route: STANDARD / DEEP
 
-Full evidence-grounded pipeline with configurable research budgets (`services/query_router.py`).
+Full evidence-grounded pipeline with configurable research budgets (`services/query_router.py`). **Decision orientation** (whether a `DecisionFrame` is produced) is separate from routing complexity (SIMPLE_FACT / STANDARD / DEEP).
 
 ## Trusted Research Chain
 
@@ -78,10 +88,26 @@ SOURCE
   → MATERIAL CLAIM
   → CROSS-SOURCE VERIFICATION
   → KNOWLEDGE STATE
-  → REPORT
 ```
 
 Every cited fact in the Writer report should trace: **Answer → Evidence → Source → URL**. Claims and verifications provide structured provenance; Knowledge State summarizes epistemic status per material claim.
+
+## Trusted Decision Chain
+
+```
+DECISION FRAME + KNOWLEDGE STATE
+  → OPTION EVALUATION
+  → DECISION SYNTHESIS
+```
+
+End-to-end (decision-oriented runs):
+
+```
+SOURCE → EVIDENCE → CLAIM → VERIFICATION → KNOWLEDGE STATE
+  → DECISION FRAME → OPTION EVALUATION → DECISION SYNTHESIS
+```
+
+The Writer produces the user-facing report but **does not yet consume** `DecisionSynthesis`.
 
 ## Query Routing
 
@@ -101,6 +127,7 @@ Output: `QueryClassification` stored in `state.query_classification` with a `Res
 |------|------|------|
 | Router | `nodes/router.py` | Classify query; set route and budget |
 | Fast Path | `nodes/fast_path.py` | SIMPLE_FACT answer or escalation |
+| Decision Framer | `nodes/decision_framer.py` | Structure decision context (Phase 3A); fail-open |
 | Planner | `nodes/planner.py` | Sub-queries, search terms, domain filters |
 | Researcher | `nodes/researcher.py` | Tavily search, spam filter, source normalization |
 | Evidence Extractor | `nodes/evidence_extractor.py` | Verbatim passages + integrity validation |
@@ -108,6 +135,8 @@ Output: `QueryClassification` stored in `state.query_classification` with a `Res
 | Claim Verifier | `nodes/claim_verifier.py` | Cross-source SUPPORTS / CONTRADICTS / QUALIFIES |
 | Critic | `nodes/critic.py` | Evidence quality; refinement loop guard |
 | Knowledge State | `nodes/knowledge_state.py` | Deterministic epistemic buckets (Phase 2D) |
+| Option Evaluator | `nodes/option_evaluator.py` | Option×criterion assessments (Phase 3B) |
+| Decision Synthesizer | `nodes/decision_synthesizer.py` | Recommendation synthesis (Phase 3C) |
 | Writer | `nodes/writer.py` | Evidence-grounded report with `[E#]` citations |
 
 ## Evidence Layer (Phase 2A)
@@ -185,7 +214,142 @@ Orphan material claims (no matching `VerificationResult`) are **not** classified
 
 ### Fast-path limitation
 
-Successful SIMPLE_FACT runs bypass Claim Verifier and **do not** receive Knowledge State in the current MVP.
+Successful SIMPLE_FACT runs bypass Claim Verifier and **do not** receive Knowledge State or decision artifacts in the current MVP.
+
+## Decision Framing (Phase 3A)
+
+`services/decision_framing.py`, `nodes/decision_framer.py` — structures decision context from query + research artifacts.
+
+**Runs on:** STANDARD / DEEP only. SIMPLE_FACT does not run Decision Framing. Framing is **fail-open** (pipeline continues if framing fails).
+
+### DecisionFrame fields
+
+| Field | Notes |
+|-------|-------|
+| `decision` | Core decision question |
+| `decision_type` | Classification of decision shape |
+| `options` | Each with label + provenance (`explicit` / `implied`) |
+| `criteria` | Each with label + provenance (`explicit` / `inferred`) + priority (`primary` / `standard`) |
+| `constraints` | Explicit-only hard constraints |
+| `time_horizon` | Decision time scope |
+| `missing_decision_context` | Gaps in framing |
+| `explicit_assumptions` | Explicit-only assumptions |
+
+### Semantics
+
+- Decision orientation is **separate** from SIMPLE / STANDARD / DEEP complexity
+- **Inferred criteria cannot be `primary`** (sanitized deterministically)
+- Constraints and assumptions are **explicit-only**
+- **No scoring or recommendation** in 3A
+
+## Option Evaluation (Phase 3B)
+
+`services/option_evaluation.py`, `nodes/option_evaluator.py`
+
+**Input:** `DecisionFrame` + `KnowledgeState`
+
+**Output:** `OptionEvaluation` — full option×criterion matrix
+
+### Assessment vocabulary
+
+`favorable` · `unfavorable` · `mixed` · `neutral` · `uncertain` · `insufficient_information`
+
+### Knowledge coverage
+
+`grounded` · `partial` · `insufficient`
+
+Each criterion evaluation preserves: option label + provenance, criterion label + provenance, criterion priority, assessment, knowledge coverage, claim IDs, verification IDs, knowledge categories, brief reason.
+
+### Invariants
+
+| Rule | Behavior |
+|------|----------|
+| Claim lineage | Every substantive evaluation has claim lineage |
+| No external knowledge | No model knowledge beyond trusted Knowledge State |
+| No recommendation / scoring | Assessments only |
+| Contradicted-only knowledge | → `insufficient_information` |
+| Disputed knowledge | Cannot produce confident directional support |
+| Unknown knowledge | Cannot become directional evidence |
+| Matrix completeness | `expected pairs = options × criteria` |
+| Empty options | No pseudo-option; **Option Evaluation skipped** when `DecisionFrame` has no concrete options |
+
+## Decision Synthesis (Phase 3C)
+
+`services/decision_synthesis.py`, `nodes/decision_synthesizer.py`
+
+**Input:** `DecisionFrame` + `OptionEvaluation` + trusted `KnowledgeState` / material claims (for hard-constraint evaluation)
+
+**Output:** `DecisionSynthesis`
+
+### Recommendation statuses
+
+`recommend` · `tentative_recommendation` · `insufficient_basis`
+
+### DecisionSynthesis fields
+
+- `recommendation_status`, `recommended_option`, `rationale`
+- `supporting_criteria`, `limiting_criteria`
+- `constraint_assessments` (every option×constraint pair)
+- `key_uncertainties`, `decision_limitations`, `critical_missing_context`
+- `assumptions_relied_on`
+- `what_would_change` / change conditions
+
+### Decision hierarchy (qualitative — no numeric weights)
+
+1. Hard constraints
+2. Explicit primary criteria
+3. Explicit standard criteria
+4. Inferred criteria
+
+### Hard-constraint semantics
+
+All `DecisionFrame` constraints are **hard constraints**. Every option×constraint pair must be assessed.
+
+| Compliance | Meaning |
+|------------|---------|
+| `satisfied` | Evidence supports compliance |
+| `violated` | Evidence supports violation |
+| `not_established` | Insufficient evidence either way |
+
+| Rule | Behavior |
+|------|----------|
+| Violated constraint | Prevents recommendation of that option |
+| Not-established constraint | Prevents full `recommend` |
+| Missing matrix pairs | Forces `insufficient_basis` |
+| Constraint evidence | May use full trusted KnowledgeState / material-claim catalog (not limited to 3B claim IDs) |
+| Absence of evidence | Is **not** violation |
+
+### Matrix completeness
+
+- **Option Evaluation:** `expected pairs = options × criteria`
+- **Decision Synthesis constraints:** `expected pairs = options × constraints`
+
+Incomplete matrices must **never** silently produce full recommendations.
+
+### What would change the recommendation
+
+Change conditions may reference existing options, criteria, constraints, explicit assumptions, missing decision context, and claim IDs. No invented thresholds or new factual claims.
+
+## Epistemic Safety
+
+Knowledge State buckets and their downstream decision behavior:
+
+| Bucket | Decision behavior |
+|--------|-------------------|
+| `known` | Usable grounded support |
+| `likely` | Usable with reduced confidence |
+| `disputed` | Cannot support confident directional assessments (≠ contradicted) |
+| `unknown` | Cannot become directional evidence |
+| `contradicted` | Not usable support; contradicted-only → `insufficient_information` in 3B |
+| `unverifiable` | Not usable as directional support |
+
+**Distinctions:**
+
+- `disputed` ≠ `contradicted`
+- `uncertain` (assessment) ≠ `insufficient_information` (assessment)
+- Insufficient evidence is a legitimate decision outcome (`insufficient_basis`)
+- Validators may preserve or **downgrade** recommendation strength
+- Validators must **never** upgrade `tentative_recommendation` → `recommend`
 
 ## AgentState
 
@@ -195,6 +359,7 @@ Defined in `state.py` as a LangGraph `TypedDict`. Key fields:
 |------|--------|
 | Routing | `query_classification`, `fast_path_metrics`, `escalate_to_standard`, `escalated_from_fast_path` |
 | Artifacts | `normalized_sources`, `validated_evidence`, `validated_claims`, `material_claims`, `claim_evidence_relations`, `verification_results`, `knowledge_state` |
+| Decision | `decision_frame`, `decision_frame_metrics`, `option_evaluation`, `option_evaluation_metrics`, `decision_synthesis`, `decision_synthesis_metrics` |
 | Control | `critique`, `iteration_count`, `current_node`, `research_sufficient` |
 | Output | `final_report` |
 | Metrics | `evidence_metrics`, `claim_metrics`, `verification_metrics`, `cost_metrics`, `report_metrics` |
@@ -241,23 +406,36 @@ See [README.md](../README.md) for deployment and entry points.
 
 ## Known Limitations (Current)
 
-- Writer does **not** consume `verification_results` or `knowledge_state`
-- Critic does **not** consume verification results
-- Successful fast-path runs have no Knowledge State
+- **Writer does not consume `DecisionSynthesis`** — user-facing report does not present structured recommendation
+- Decision artifacts inspectable via state / metadata / validation scripts only
+- **Writer** does not consume `verification_results` or `knowledge_state`
+- **Critic** does not consume verification results
+- **Planner / research** not guided by `DecisionFrame`
+- Successful fast-path runs have no Knowledge State or decision artifacts
+- No persistent decision workspace, monitoring, change detection, or automatic re-evaluation
+- No actions / execution layer; no numerical utility or weighting
+- Constraint mapping relies on constrained LLM semantic judgment against trusted claims
+- Full KnowledgeState claim catalog used (no relevance-aware truncation)
 - Publisher-domain independence is approximate
 - Cross-domain `supported` / `known` depends on retrieval yielding diverse sources
-- No Decision Engine, monitoring, or change detection
 
 ## Testing
 
 ```bash
-uv run pytest   # 178 tests, no live LLM for core logic
+uv run pytest   # 244 tests, no live LLM for core logic
 ```
 
-Phase validation scripts (manual / constrained live):
+Phase validation scripts (isolated live LLM — manual inspection):
 
-- `scripts/validate_phase_2a5_e2e.py` — evidence
-- `scripts/validate_phase_2b_e2e.py` — claims
-- `scripts/validate_phase_2b7_e2e.py` — fast path
-- `scripts/validate_phase_2c_e2e.py` — verification
-- `scripts/validate_phase_2d_e2e.py` — knowledge state
+| Script | Phase |
+|--------|-------|
+| `scripts/validate_phase_2a5_e2e.py` | Evidence extraction |
+| `scripts/validate_phase_2b_e2e.py` | Claim extraction |
+| `scripts/validate_phase_2b7_e2e.py` | SIMPLE_FACT fast path |
+| `scripts/validate_phase_2c_e2e.py` | Cross-source verification |
+| `scripts/validate_phase_2d_e2e.py` | Knowledge State buckets |
+| `scripts/validate_phase_3a_e2e.py` | Decision Framing |
+| `scripts/validate_phase_3b_live.py` | Option Evaluation |
+| `scripts/validate_phase_3c_live.py` | Decision Synthesis |
+
+Isolated live validation has been completed for Decision Framing, Option Evaluation, and Decision Synthesis. Full end-to-end production evaluation of decision artifacts in the Writer/UI is **not** implemented.

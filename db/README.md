@@ -66,7 +66,9 @@ Persistence is skipped when `SUPABASE_URL` / `SUPABASE_KEY` are unset; the agent
 Phase 2D writes:
 
 - `verifications.knowledge_category` — `known`, `likely`, `disputed`, or `unknown` (null for contradicted/unverifiable)
-- `research_runs.metadata` — compact `knowledge_state` snapshot at finalize (IDs and metrics only)
+- `research_runs.metadata` — compact snapshots at finalize (IDs and metrics only)
+
+Decision artifacts (`decision_frame`, `option_evaluation`, `decision_synthesis`) may appear in `research_runs.metadata` when present in final state. There is no dedicated decision-persistence schema yet.
 
 ## Manual Usage (Legacy Reports)
 

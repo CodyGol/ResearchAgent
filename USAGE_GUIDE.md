@@ -2,25 +2,29 @@
 
 ## System Overview
 
-ResearchAgentv2 is an evidence-grounded research agent (Phase 2D) with:
+ResearchAgentv2 is an evidence-grounded research agent (Phase 3C) with:
 
 - **Backend**: FastAPI service (`api.py`) with NDJSON streaming
 - **Frontend**: Next.js Deep Research Console (`research-client/`)
-- **Agent**: LangGraph pipeline — Router → (Fast Path | full pipeline) → Knowledge State → Writer
+- **Agent**: LangGraph pipeline — Router → (Fast Path | Decision Framer → full pipeline) → Knowledge State → (Option Evaluation → Decision Synthesis) → Writer
 - **Persistence**: Optional Supabase (research runs, sources, evidence, claims, verifications)
 - **Observability**: LangSmith tracing and per-stage metrics
-- **Tests**: 178 passing (`uv run pytest`)
+- **Tests**: 244 passing (`uv run pytest`)
 
 **Full pipeline (STANDARD / DEEP):**
 
 ```
-Planner → Researcher → Evidence Extractor → Claim Extractor → Claim Verifier → Critic
-  → (loop to Researcher | Knowledge State → Writer)
+Decision Framer → Planner → Researcher → Evidence → Claims → Verification → Critic
+  → (loop | Knowledge State)
+  → [Option Evaluation → Decision Synthesis]  (when decision_frame present with options)
+  → Writer
 ```
 
-**Trusted chain:** SOURCE → VALIDATED EVIDENCE → MATERIAL CLAIM → VERIFICATION → KNOWLEDGE STATE → REPORT
+**Trusted research chain:** SOURCE → VALIDATED EVIDENCE → MATERIAL CLAIM → VERIFICATION → KNOWLEDGE STATE
 
-See [docs/architecture.md](docs/architecture.md) for diagrams. See [docs/roadmap.md](docs/roadmap.md) for what is not yet implemented (Decision Engine, Writer/Knowledge State integration, etc.).
+**Trusted decision chain:** DECISION FRAME + KNOWLEDGE STATE → OPTION EVALUATION → DECISION SYNTHESIS
+
+See [docs/architecture.md](docs/architecture.md) for diagrams. See [docs/roadmap.md](docs/roadmap.md) for implemented vs future work.
 
 ---
 
@@ -70,10 +74,15 @@ async def research(query: str):
 
 result = asyncio.run(research("Latest AI safety research"))
 report = result["final_report"]
-knowledge_state = result.get("knowledge_state")  # full pipeline only; None on fast-path success
+knowledge_state = result.get("knowledge_state")       # full pipeline only
+decision_frame = result.get("decision_frame")         # STANDARD/DEEP only
+option_evaluation = result.get("option_evaluation")   # when options present
+decision_synthesis = result.get("decision_synthesis")   # when option eval ran
 print(report.content)
 if knowledge_state:
     print(knowledge_state["metrics"])
+if decision_synthesis:
+    print(decision_synthesis["recommendation_status"])
 ```
 
 > **Note:** Use `create_initial_state` for all programmatic runs so routing, persistence, and metrics initialize correctly.
@@ -186,9 +195,10 @@ MAX_RESEARCH_ITERATIONS=5  # More refinement cycles
 ### Unit / integration tests (no live LLM for core logic)
 
 ```bash
-uv run pytest              # 178 tests
+uv run pytest              # 244 tests
 uv run pytest tests/test_knowledge_state.py -v
 uv run pytest tests/test_claim_verification.py -v
+uv run pytest tests/test_decision_synthesis.py -v
 ```
 
 ### Evaluation (requires API keys)
@@ -206,10 +216,16 @@ uv run python run_eval.py
 | `scripts/validate_phase_2b7_e2e.py` | SIMPLE_FACT fast path |
 | `scripts/validate_phase_2c_e2e.py` | Cross-source verification |
 | `scripts/validate_phase_2d_e2e.py` | Knowledge State buckets |
+| `scripts/validate_phase_3a_e2e.py` | Decision Framing |
+| `scripts/validate_phase_3b_live.py` | Option Evaluation (isolated live) |
+| `scripts/validate_phase_3c_live.py` | Decision Synthesis (isolated live) |
 
 ```bash
-uv run python scripts/validate_phase_2d_e2e.py "Who won the 2023 Formula 1 World Championship?"
+uv run python scripts/validate_phase_3c_live.py
+uv run python scripts/validate_phase_3a_e2e.py "Should we adopt Kubernetes or serverless?"
 ```
+
+Isolated live validation has been completed for Decision Framing, Option Evaluation, and Decision Synthesis. The Writer does not yet surface `DecisionSynthesis` in the user-facing report.
 
 ---
 
@@ -329,6 +345,20 @@ async def debug_research(query: str):
         if node_name == "knowledge_state" and node_state.get("knowledge_state"):
             ks = node_state["knowledge_state"]
             print(f"Knowledge metrics: {ks.get('metrics', {})}")
+
+        if node_name == "decision_framer" and node_state.get("decision_frame"):
+            df = node_state["decision_frame"]
+            print(f"Decision: {df.get('decision', '')[:80]}")
+            print(f"Options: {len(df.get('options', []))}, Criteria: {len(df.get('criteria', []))}")
+
+        if node_name == "option_evaluator" and node_state.get("option_evaluation"):
+            oe = node_state["option_evaluation"]
+            print(f"Option evaluations: {len(oe.get('evaluations', []))}")
+
+        if node_name == "decision_synthesizer" and node_state.get("decision_synthesis"):
+            ds = node_state["decision_synthesis"]
+            print(f"Recommendation status: {ds.get('recommendation_status')}")
+            print(f"Recommended option: {ds.get('recommended_option')}")
 
         if node_name == "writer" and node_state.get("final_report"):
             report = node_state["final_report"]
@@ -607,4 +637,4 @@ python run_eval.py
 
 ---
 
-ResearchAgentv2 is a **self-correcting, evidence-grounded research system**. The full pipeline produces validated evidence, verified material claims, a deterministic Knowledge State, and a cited report. See [docs/architecture.md](docs/architecture.md) for current limitations (e.g. Writer does not yet consume Knowledge State).
+ResearchAgentv2 is a **self-correcting, evidence-grounded research system**. The full pipeline produces validated evidence, verified material claims, a deterministic Knowledge State, and—for decision-oriented queries—structured option evaluation and decision synthesis. The Writer produces a cited report but **does not yet consume DecisionSynthesis**. See [docs/architecture.md](docs/architecture.md) for current limitations.
