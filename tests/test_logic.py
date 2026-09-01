@@ -218,6 +218,8 @@ class TestStateStructure:
             "knowledge_state": None,
             "decision_frame": None,
             "decision_frame_metrics": None,
+            "option_evaluation": None,
+            "option_evaluation_metrics": None,
             "claim_metrics": None,
             "source_dedup_metrics": None,
             "report_metrics": None,

@@ -22,6 +22,7 @@ from nodes.planner import planner_node
 from nodes.researcher import researcher_node
 from nodes.decision_framer import decision_framer_node
 from nodes.knowledge_state import knowledge_state_node
+from nodes.option_evaluator import option_evaluator_node
 from nodes.writer import writer_node
 from services.pipeline_init import create_initial_state
 from state import AgentState
@@ -34,7 +35,8 @@ def create_graph() -> StateGraph:
     Graph structure:
         START -> router -> [fast_path | decision_framer]
         fast_path -> [END | decision_framer]  (escalation)
-        decision_framer -> planner -> researcher -> ... -> knowledge_state -> writer -> END
+        decision_framer -> planner -> researcher -> ... -> knowledge_state
+          -> [option_evaluator | writer] -> writer -> END
     """
     graph = StateGraph(AgentState)
 
@@ -48,6 +50,7 @@ def create_graph() -> StateGraph:
     graph.add_node("claim_verifier", claim_verifier_node)
     graph.add_node("critic", critic_node)
     graph.add_node("knowledge_state", knowledge_state_node)
+    graph.add_node("option_evaluator", option_evaluator_node)
     graph.add_node("writer", writer_node)
 
     graph.add_edge(START, "router")
@@ -106,7 +109,22 @@ def create_graph() -> StateGraph:
         {"researcher": "researcher", "knowledge_state": "knowledge_state"},
     )
 
-    graph.add_edge("knowledge_state", "writer")
+    def route_after_knowledge_state(state: AgentState) -> str:
+        frame = state.get("decision_frame")
+        ks = state.get("knowledge_state")
+        if not frame or not ks:
+            return "writer"
+        options = frame.get("options") or []
+        if not options:
+            return "writer"
+        return "option_evaluator"
+
+    graph.add_conditional_edges(
+        "knowledge_state",
+        route_after_knowledge_state,
+        {"option_evaluator": "option_evaluator", "writer": "writer"},
+    )
+    graph.add_edge("option_evaluator", "writer")
     graph.add_edge("writer", END)
 
     return graph

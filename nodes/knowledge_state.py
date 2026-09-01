@@ -3,6 +3,7 @@
 import logging
 
 from services.knowledge_state import derive_knowledge_state, knowledge_state_snapshot
+from services.option_evaluation import skip_metrics
 from state import AgentState, Critique
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,13 @@ async def knowledge_state_node(state: AgentState) -> AgentState:
         "knowledge_orphan_claims": knowledge_state.metrics.get("orphan_material_claims", 0),
     })
     state["cost_metrics"] = cost
-    state["current_node"] = "writer"
+
+    frame = state.get("decision_frame")
+    has_options = bool(frame and (frame.get("options") or []))
+    if frame and not has_options:
+        state["option_evaluation"] = None
+        state["option_evaluation_metrics"] = skip_metrics("no_concrete_options").to_dict()
+    state["current_node"] = "option_evaluator" if has_options else "writer"
 
     logger.info(
         "Knowledge state: known=%d likely=%d disputed=%d unknown=%d "

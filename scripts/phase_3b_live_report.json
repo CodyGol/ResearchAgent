@@ -1,0 +1,822 @@
+{
+  "isolated_results": [
+    {
+      "name": "TEST 1 \u2014 CLEAR GROUNDED DIRECTION",
+      "pass": true,
+      "expected_pairs": 2,
+      "llm_returned_rows": 2,
+      "validated_pairs": 2,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Vendor A",
+          "criterion": "Cost",
+          "assessment": "favorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            101,
+            102
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Vendor A costs $12,000 per year at the stated usage level (claim 101), which is $8,000 less than Vendor B's $20,000 annual cost (claim 102), representing a lower cost option."
+        },
+        {
+          "option": "Vendor B",
+          "criterion": "Cost",
+          "assessment": "unfavorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            102,
+            101
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Vendor B costs $20,000 per year at the stated usage level (claim 102), which is $8,000 more than Vendor A's $12,000 annual cost (claim 101), representing a higher cost option."
+        }
+      ],
+      "metrics": {
+        "option_count": 2,
+        "criterion_count": 1,
+        "catalog_claim_count": 2,
+        "evaluations_generated": 2,
+        "grounded_evaluation_count": 2,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 4,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 2 \u2014 MULTI-CRITERION COMPLETE MATRIX",
+      "pass": true,
+      "expected_pairs": 6,
+      "llm_returned_rows": 6,
+      "validated_pairs": 6,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Platform A",
+          "criterion": "Cost",
+          "assessment": "favorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            201
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Platform A has an annual cost of $8,000 at stated usage, which is significantly lower than the alternative."
+        },
+        {
+          "option": "Platform A",
+          "criterion": "Reliability",
+          "assessment": "unfavorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            203
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Platform A achieved 99.1% uptime in the reference period, which is lower than the alternative platform's uptime."
+        },
+        {
+          "option": "Platform A",
+          "criterion": "Integration",
+          "assessment": "insufficient_information",
+          "coverage": "insufficient",
+          "claim_ids": [],
+          "option_origin": "explicit",
+          "criterion_origin": "inferred",
+          "reason": "No claims in the catalog address Platform A's integration capabilities or compatibility."
+        },
+        {
+          "option": "Platform B",
+          "criterion": "Cost",
+          "assessment": "unfavorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            202
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Platform B has an annual cost of $15,000 at stated usage, which is nearly double the cost of the alternative."
+        },
+        {
+          "option": "Platform B",
+          "criterion": "Reliability",
+          "assessment": "favorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            204
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Platform B achieved 99.9% uptime in the reference period, demonstrating higher reliability than the alternative."
+        },
+        {
+          "option": "Platform B",
+          "criterion": "Integration",
+          "assessment": "insufficient_information",
+          "coverage": "insufficient",
+          "claim_ids": [],
+          "option_origin": "explicit",
+          "criterion_origin": "inferred",
+          "reason": "No claims in the catalog address Platform B's integration capabilities or compatibility."
+        }
+      ],
+      "metrics": {
+        "option_count": 2,
+        "criterion_count": 3,
+        "catalog_claim_count": 4,
+        "evaluations_generated": 6,
+        "grounded_evaluation_count": 4,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 2,
+        "referenced_claim_count": 4,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 3 \u2014 DISPUTED KNOWLEDGE",
+      "pass": true,
+      "expected_pairs": 2,
+      "llm_returned_rows": 2,
+      "validated_pairs": 2,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Enter Market X",
+          "criterion": "Regulatory environment",
+          "assessment": "uncertain",
+          "coverage": "partial",
+          "claim_ids": [
+            301
+          ],
+          "option_origin": "implied",
+          "criterion_origin": "inferred",
+          "reason": "Claim 301 indicates that regulatory requirements are subject to pending legislation and disputed among analysts, creating significant uncertainty about the regulatory landscape that would govern market entry."
+        },
+        {
+          "option": "Do Not Enter Market X",
+          "criterion": "Regulatory environment",
+          "assessment": "uncertain",
+          "coverage": "partial",
+          "claim_ids": [
+            301
+          ],
+          "option_origin": "implied",
+          "criterion_origin": "inferred",
+          "reason": "Claim 301 shows that the regulatory environment is uncertain due to pending legislation and analyst disagreement, which affects the evaluation of staying out but does not clearly favor or disfavor this option without additional context about risk tol"
+        }
+      ],
+      "metrics": {
+        "option_count": 2,
+        "criterion_count": 1,
+        "catalog_claim_count": 1,
+        "evaluations_generated": 2,
+        "grounded_evaluation_count": 0,
+        "partial_evaluation_count": 2,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 2,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [
+        "Validator enforced uncertain on disputed claim",
+        "Validator enforced uncertain on disputed claim"
+      ],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 4 \u2014 CONTRADICTED KNOWLEDGE",
+      "pass": false,
+      "expected_pairs": 2,
+      "llm_returned_rows": 2,
+      "validated_pairs": 2,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Enter Market X",
+          "criterion": "Market growth",
+          "assessment": "uncertain",
+          "coverage": "partial",
+          "claim_ids": [
+            401
+          ],
+          "option_origin": "implied",
+          "criterion_origin": "inferred",
+          "reason": "Claim 401 indicates that growth estimates for Market X conflict across sources, making it impossible to determine whether market growth is favorable or unfavorable for entry. The contradicted status means there is no reliable evidence to assess this "
+        },
+        {
+          "option": "Do Not Enter Market X",
+          "criterion": "Market growth",
+          "assessment": "uncertain",
+          "coverage": "partial",
+          "claim_ids": [
+            401
+          ],
+          "option_origin": "implied",
+          "criterion_origin": "inferred",
+          "reason": "Claim 401 shows that Market X growth estimates conflict across sources. This uncertainty about market growth makes it unclear whether avoiding entry is justified or not on growth grounds, as the actual growth trajectory cannot be reliably determined."
+        }
+      ],
+      "metrics": {
+        "option_count": 2,
+        "criterion_count": 1,
+        "catalog_claim_count": 1,
+        "evaluations_generated": 2,
+        "grounded_evaluation_count": 0,
+        "partial_evaluation_count": 2,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 2,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [
+        "Expected insufficient_information with claim 401, got uncertain",
+        "Expected insufficient_information with claim 401, got uncertain"
+      ],
+      "epistemic_notes": [
+        "Enter Market X: assessment=uncertain, claims=[401]",
+        "Do Not Enter Market X: assessment=uncertain, claims=[401]"
+      ],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 5 \u2014 UNVERIFIABLE KNOWLEDGE",
+      "pass": true,
+      "expected_pairs": 1,
+      "llm_returned_rows": 1,
+      "validated_pairs": 1,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Enter Market X",
+          "criterion": "Competitive intensity",
+          "assessment": "insufficient_information",
+          "coverage": "insufficient",
+          "claim_ids": [
+            501
+          ],
+          "option_origin": "implied",
+          "criterion_origin": "inferred",
+          "reason": "Claim 501 explicitly states that competitive dynamics in Market X cannot be verified from available sources. No usable claims exist to assess the competitive intensity of this market."
+        }
+      ],
+      "metrics": {
+        "option_count": 1,
+        "criterion_count": 1,
+        "catalog_claim_count": 1,
+        "evaluations_generated": 1,
+        "grounded_evaluation_count": 0,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 1,
+        "referenced_claim_count": 1,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [
+        "assessment=insufficient_information, coverage=insufficient"
+      ],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 6 \u2014 MIXED EVIDENCE",
+      "pass": true,
+      "expected_pairs": 1,
+      "llm_returned_rows": 1,
+      "validated_pairs": 1,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Enter Market X",
+          "criterion": "Market opportunity",
+          "assessment": "mixed",
+          "coverage": "grounded",
+          "claim_ids": [
+            601,
+            602
+          ],
+          "option_origin": "implied",
+          "criterion_origin": "inferred",
+          "reason": "Claim 601 indicates a large addressable market, which is favorable for market opportunity. However, claim 602 shows that demand growth has recently slowed materially, which diminishes the opportunity. These claims point in opposing directions regardi"
+        }
+      ],
+      "metrics": {
+        "option_count": 1,
+        "criterion_count": 1,
+        "catalog_claim_count": 2,
+        "evaluations_generated": 1,
+        "grounded_evaluation_count": 1,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 2,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 7 \u2014 NO RELEVANT INFORMATION",
+      "pass": true,
+      "expected_pairs": 1,
+      "llm_returned_rows": 1,
+      "validated_pairs": 1,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Vendor A",
+          "criterion": "Implementation cost",
+          "assessment": "insufficient_information",
+          "coverage": "insufficient",
+          "claim_ids": [],
+          "option_origin": "explicit",
+          "criterion_origin": "inferred",
+          "reason": "No claims in the catalog address implementation cost, pricing, or financial aspects of Vendor A. The available claims cover reliability (701), security (702), and market share (703), but none provide information relevant to cost."
+        }
+      ],
+      "metrics": {
+        "option_count": 1,
+        "criterion_count": 1,
+        "catalog_claim_count": 3,
+        "evaluations_generated": 1,
+        "grounded_evaluation_count": 0,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 1,
+        "referenced_claim_count": 0,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 8 \u2014 NO EXTERNAL KNOWLEDGE",
+      "pass": true,
+      "expected_pairs": 2,
+      "llm_returned_rows": 2,
+      "validated_pairs": 2,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "OpenAI",
+          "criterion": "Cost",
+          "assessment": "favorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            801
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Claim 801 states that OpenAI costs less than Anthropic under this hypothetical contract, indicating a cost advantage for OpenAI."
+        },
+        {
+          "option": "Anthropic",
+          "criterion": "Cost",
+          "assessment": "unfavorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            801
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Claim 801 states that OpenAI costs less than Anthropic under this hypothetical contract, indicating that Anthropic has higher costs."
+        }
+      ],
+      "metrics": {
+        "option_count": 2,
+        "criterion_count": 1,
+        "catalog_claim_count": 1,
+        "evaluations_generated": 2,
+        "grounded_evaluation_count": 2,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 2,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 9 \u2014 BINARY OPTIONS NOT MIRRORED",
+      "pass": false,
+      "expected_pairs": 2,
+      "llm_returned_rows": 2,
+      "validated_pairs": 2,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Enter Market X",
+          "criterion": "Strategic fit",
+          "assessment": "unfavorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            901
+          ],
+          "option_origin": "implied",
+          "criterion_origin": "inferred",
+          "reason": "Claim 901 indicates that entering Market X would strain the company's existing strategic focus and core competencies, suggesting poor alignment with current strategic direction."
+        },
+        {
+          "option": "Do Not Enter Market X",
+          "criterion": "Strategic fit",
+          "assessment": "favorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            901
+          ],
+          "option_origin": "implied",
+          "criterion_origin": "inferred",
+          "reason": "Claim 901 indicates that entering Market X would strain existing strategic focus and core competencies; avoiding market entry would preserve alignment with current strategic direction and core competencies."
+        }
+      ],
+      "metrics": {
+        "option_count": 2,
+        "criterion_count": 1,
+        "catalog_claim_count": 1,
+        "evaluations_generated": 2,
+        "grounded_evaluation_count": 2,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 2,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [
+        "Suspicious perfect mirror: Enter=unfavorable AND Do Not Enter=favorable without independent reasoning"
+      ],
+      "epistemic_notes": [
+        "Enter=unfavorable, DoNotEnter=favorable"
+      ],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 10 \u2014 RECOMMENDATION LEAKAGE",
+      "pass": true,
+      "expected_pairs": 4,
+      "llm_returned_rows": 4,
+      "validated_pairs": 4,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Vendor A",
+          "criterion": "Cost",
+          "assessment": "favorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            1001
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Vendor A costs $5,000 per year at stated usage, which is significantly lower than the alternative."
+        },
+        {
+          "option": "Vendor A",
+          "criterion": "Security",
+          "assessment": "favorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            1003
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Vendor A meets all stated security requirements."
+        },
+        {
+          "option": "Vendor B",
+          "criterion": "Cost",
+          "assessment": "unfavorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            1002
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Vendor B costs $18,000 per year at stated usage, which is substantially higher than the alternative."
+        },
+        {
+          "option": "Vendor B",
+          "criterion": "Security",
+          "assessment": "unfavorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            1004
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Vendor B has unresolved security compliance gaps."
+        }
+      ],
+      "metrics": {
+        "option_count": 2,
+        "criterion_count": 2,
+        "catalog_claim_count": 4,
+        "evaluations_generated": 4,
+        "grounded_evaluation_count": 4,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 4,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [
+        "No recommendation language in validated output"
+      ],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    },
+    {
+      "name": "TEST 11 \u2014 PROVENANCE",
+      "pass": true,
+      "expected_pairs": 2,
+      "llm_returned_rows": 2,
+      "validated_pairs": 2,
+      "missing_pairs": [],
+      "pairs": [
+        {
+          "option": "Vendor A",
+          "criterion": "Cost",
+          "assessment": "favorable",
+          "coverage": "grounded",
+          "claim_ids": [
+            1101
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "explicit",
+          "reason": "Claim 1101 states that Vendor A pricing is competitive, indicating a positive cost position."
+        },
+        {
+          "option": "Vendor A",
+          "criterion": "Implementation ease",
+          "assessment": "neutral",
+          "coverage": "grounded",
+          "claim_ids": [
+            1102
+          ],
+          "option_origin": "explicit",
+          "criterion_origin": "inferred",
+          "reason": "Claim 1102 indicates that Vendor A deployment requires moderate engineering effort, which is neither particularly easy nor difficult."
+        }
+      ],
+      "metrics": {
+        "option_count": 1,
+        "criterion_count": 2,
+        "catalog_claim_count": 2,
+        "evaluations_generated": 2,
+        "grounded_evaluation_count": 2,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 2,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 1,
+        "evaluation_time_ms": 0.0,
+        "evaluation_failed": false,
+        "evaluation_skipped": false,
+        "evaluation_skipped_reason": null,
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": false,
+      "semantic_failures": [],
+      "epistemic_notes": [],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": true
+    },
+    {
+      "name": "TEST 12 \u2014 EMPTY OPTIONS",
+      "pass": true,
+      "expected_pairs": 0,
+      "llm_returned_rows": 0,
+      "validated_pairs": 0,
+      "missing_pairs": [],
+      "pairs": [],
+      "metrics": {
+        "option_count": 0,
+        "criterion_count": 0,
+        "catalog_claim_count": 0,
+        "evaluations_generated": 0,
+        "grounded_evaluation_count": 0,
+        "partial_evaluation_count": 0,
+        "insufficient_evaluation_count": 0,
+        "referenced_claim_count": 0,
+        "invalid_reference_count": 0,
+        "rejected_row_count": 0,
+        "evaluation_llm_calls": 0,
+        "evaluation_time_ms": 0.01,
+        "evaluation_failed": false,
+        "evaluation_skipped": true,
+        "evaluation_skipped_reason": "no_concrete_options",
+        "failure_reason": null
+      },
+      "evaluation_failed": false,
+      "evaluation_skipped": true,
+      "semantic_failures": [],
+      "epistemic_notes": [],
+      "recommendation_leakage": [],
+      "external_knowledge_flags": [],
+      "provenance_ok": null
+    }
+  ],
+  "matrix_coverage_summary": [
+    {
+      "test": "TEST 1 \u2014 CLEAR GROUNDED DIRECTION",
+      "expected": 2,
+      "llm_returned": 2,
+      "validated": 2,
+      "missing": []
+    },
+    {
+      "test": "TEST 2 \u2014 MULTI-CRITERION COMPLETE MATRIX",
+      "expected": 6,
+      "llm_returned": 6,
+      "validated": 6,
+      "missing": []
+    },
+    {
+      "test": "TEST 3 \u2014 DISPUTED KNOWLEDGE",
+      "expected": 2,
+      "llm_returned": 2,
+      "validated": 2,
+      "missing": []
+    },
+    {
+      "test": "TEST 4 \u2014 CONTRADICTED KNOWLEDGE",
+      "expected": 2,
+      "llm_returned": 2,
+      "validated": 2,
+      "missing": []
+    },
+    {
+      "test": "TEST 5 \u2014 UNVERIFIABLE KNOWLEDGE",
+      "expected": 1,
+      "llm_returned": 1,
+      "validated": 1,
+      "missing": []
+    },
+    {
+      "test": "TEST 6 \u2014 MIXED EVIDENCE",
+      "expected": 1,
+      "llm_returned": 1,
+      "validated": 1,
+      "missing": []
+    },
+    {
+      "test": "TEST 7 \u2014 NO RELEVANT INFORMATION",
+      "expected": 1,
+      "llm_returned": 1,
+      "validated": 1,
+      "missing": []
+    },
+    {
+      "test": "TEST 8 \u2014 NO EXTERNAL KNOWLEDGE",
+      "expected": 2,
+      "llm_returned": 2,
+      "validated": 2,
+      "missing": []
+    },
+    {
+      "test": "TEST 9 \u2014 BINARY OPTIONS NOT MIRRORED",
+      "expected": 2,
+      "llm_returned": 2,
+      "validated": 2,
+      "missing": []
+    },
+    {
+      "test": "TEST 10 \u2014 RECOMMENDATION LEAKAGE",
+      "expected": 4,
+      "llm_returned": 4,
+      "validated": 4,
+      "missing": []
+    },
+    {
+      "test": "TEST 11 \u2014 PROVENANCE",
+      "expected": 2,
+      "llm_returned": 2,
+      "validated": 2,
+      "missing": []
+    }
+  ],
+  "systematic_pair_omission_detected": false,
+  "isolated_pass_count": 10,
+  "isolated_total": 12,
+  "optional_e2e": null,
+  "phase_3b_live_validation": "FAIL",
+  "ready_to_freeze": "NO"
+}

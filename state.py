@@ -195,6 +195,12 @@ class AgentState(TypedDict):
     decision_frame_metrics: Annotated[
         dict | None, "Decision framing observability metrics"
     ]
+    option_evaluation: Annotated[
+        dict | None, "Evidence-grounded option evaluation (Phase 3B)"
+    ]
+    option_evaluation_metrics: Annotated[
+        dict | None, "Option evaluation observability metrics"
+    ]
     cost_metrics: Annotated[
         dict | None, "Cost and latency observability metrics"
     ]
@@ -252,6 +258,7 @@ class AgentState(TypedDict):
             "critic",
             "decision_framer",
             "knowledge_state",
+            "option_evaluator",
             "writer",
             "end",
         ],
