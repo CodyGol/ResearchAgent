@@ -62,7 +62,7 @@ async def option_evaluator_node(state: AgentState) -> AgentState:
         "evaluation_time_ms": metrics.evaluation_time_ms,
     })
     state["cost_metrics"] = cost
-    state["current_node"] = "writer"
+    state["current_node"] = "decision_synthesizer"
 
     logger.info(
         "Option evaluator: options=%d criteria=%d evals=%d skipped=%s failed=%s (%.0fms)",

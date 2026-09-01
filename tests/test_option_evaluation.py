@@ -533,6 +533,7 @@ class TestGraphPlacement:
         state = {"knowledge_state": {"known": []}}
         assert self._route_after_knowledge_state(state) == "writer"
 
-    def test_option_evaluator_edges_to_writer(self):
+    def test_graph_routes_through_decision_synthesizer(self):
         graph = create_graph()
-        assert ("option_evaluator", "writer") in graph.edges
+        assert "decision_synthesizer" in graph.nodes
+        assert ("decision_synthesizer", "writer") in graph.edges

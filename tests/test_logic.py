@@ -220,6 +220,8 @@ class TestStateStructure:
             "decision_frame_metrics": None,
             "option_evaluation": None,
             "option_evaluation_metrics": None,
+            "decision_synthesis": None,
+            "decision_synthesis_metrics": None,
             "claim_metrics": None,
             "source_dedup_metrics": None,
             "report_metrics": None,

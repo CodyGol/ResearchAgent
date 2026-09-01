@@ -23,6 +23,7 @@ from nodes.researcher import researcher_node
 from nodes.decision_framer import decision_framer_node
 from nodes.knowledge_state import knowledge_state_node
 from nodes.option_evaluator import option_evaluator_node
+from nodes.decision_synthesizer import decision_synthesizer_node
 from nodes.writer import writer_node
 from services.pipeline_init import create_initial_state
 from state import AgentState
@@ -36,7 +37,7 @@ def create_graph() -> StateGraph:
         START -> router -> [fast_path | decision_framer]
         fast_path -> [END | decision_framer]  (escalation)
         decision_framer -> planner -> researcher -> ... -> knowledge_state
-          -> [option_evaluator | writer] -> writer -> END
+          -> [option_evaluator | writer] -> [decision_synthesizer | writer] -> writer -> END
     """
     graph = StateGraph(AgentState)
 
@@ -51,6 +52,7 @@ def create_graph() -> StateGraph:
     graph.add_node("critic", critic_node)
     graph.add_node("knowledge_state", knowledge_state_node)
     graph.add_node("option_evaluator", option_evaluator_node)
+    graph.add_node("decision_synthesizer", decision_synthesizer_node)
     graph.add_node("writer", writer_node)
 
     graph.add_edge(START, "router")
@@ -124,7 +126,19 @@ def create_graph() -> StateGraph:
         route_after_knowledge_state,
         {"option_evaluator": "option_evaluator", "writer": "writer"},
     )
-    graph.add_edge("option_evaluator", "writer")
+    def route_after_option_evaluator(state: AgentState) -> str:
+        oe = state.get("option_evaluation")
+        metrics = state.get("option_evaluation_metrics") or {}
+        if not oe or metrics.get("evaluation_failed") or metrics.get("evaluation_skipped"):
+            return "writer"
+        return "decision_synthesizer"
+
+    graph.add_conditional_edges(
+        "option_evaluator",
+        route_after_option_evaluator,
+        {"decision_synthesizer": "decision_synthesizer", "writer": "writer"},
+    )
+    graph.add_edge("decision_synthesizer", "writer")
     graph.add_edge("writer", END)
 
     return graph

@@ -42,6 +42,8 @@ async def create_initial_state(query: str) -> tuple[AgentState, RunContext]:
         "decision_frame_metrics": None,
         "option_evaluation": None,
         "option_evaluation_metrics": None,
+        "decision_synthesis": None,
+        "decision_synthesis_metrics": None,
         "claim_metrics": None,
         "source_dedup_metrics": None,
         "report_metrics": None,
@@ -98,6 +100,8 @@ async def finalize_from_state(state: AgentState, ctx: RunContext) -> None:
             "decision_frame_metrics": state.get("decision_frame_metrics"),
             "option_evaluation": state.get("option_evaluation"),
             "option_evaluation_metrics": state.get("option_evaluation_metrics"),
+            "decision_synthesis": state.get("decision_synthesis"),
+            "decision_synthesis_metrics": state.get("decision_synthesis_metrics"),
         },
         error=state.get("error"),
     )
