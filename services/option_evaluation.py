@@ -51,6 +51,15 @@ _BUCKET_FIELDS = (
     "unverifiable",
 )
 
+_SCOPE_API_PRICING = re.compile(
+    r"\b(api|token|per[\s-]?million|per[\s-]?1m|inference|pricing page|price per)\b",
+    re.IGNORECASE,
+)
+_SCOPE_SUBSCRIPTION = re.compile(
+    r"\b(subscription|monthly plan|claude code|consumer plan|pro plan|seat)\b",
+    re.IGNORECASE,
+)
+
 _EVALUATION_SYSTEM_PROMPT = """You are an evidence-grounded option evaluator for a research system.
 
 You receive:
@@ -73,6 +82,7 @@ RULES:
 - reason: brief explanation of the implication from cited claims — NO recommendation language
 - Do NOT say "we recommend", "best choice", "winner", "you should choose", or rank options
 - Evaluate each option independently — do not mirror assessments across binary options
+- When comparing options on a criterion, do NOT infer relative superiority from evidence that is not materially comparable in scope, product, unit, or use case (e.g. API token pricing vs consumer subscription plans). If comparable evidence is unavailable for one option, prefer uncertain or insufficient_information rather than directional comparative language.
 - Do NOT add options or criteria not in the DecisionFrame"""
 
 
@@ -190,6 +200,68 @@ def _downgrade_assessment(
         return CriterionAssessment.UNCERTAIN
 
     return assessment
+
+
+def _scope_tags_for_claims(
+    claim_ids: list[int],
+    catalog: dict[int, ClaimCatalogEntry],
+) -> set[str]:
+    tags: set[str] = set()
+    for cid in claim_ids:
+        entry = catalog.get(cid)
+        if not entry or not entry.claim_text:
+            continue
+        text = entry.claim_text.lower()
+        if _SCOPE_API_PRICING.search(text):
+            tags.add("api_pricing")
+        if _SCOPE_SUBSCRIPTION.search(text):
+            tags.add("subscription")
+    return tags
+
+
+def _apply_cross_option_scope_guard(
+    by_option: dict[str, OptionEvaluationEntry],
+    criterion_label: str,
+    catalog: dict[int, ClaimCatalogEntry],
+) -> None:
+    """
+    Downgrade directional assessments when options cite obviously non-comparable evidence scopes.
+    """
+    crit_norm = _normalize_label(criterion_label)
+    scoped: dict[str, tuple[CriterionEvaluation, set[str]]] = {}
+    for entry in by_option.values():
+        ce = next(
+            (row for row in entry.criteria_evaluations if _normalize_label(row.criterion_label) == crit_norm),
+            None,
+        )
+        if ce is None:
+            continue
+        scoped[entry.option_label] = (ce, _scope_tags_for_claims(ce.claim_ids, catalog))
+
+    if len(scoped) < 2:
+        return
+
+    all_tags = set().union(*(tags for _, tags in scoped.values()))
+    if "api_pricing" not in all_tags or "subscription" not in all_tags:
+        return
+
+    directional_opts = {
+        opt
+        for opt, (ce, tags) in scoped.items()
+        if ce.assessment in _DIRECTIONAL and tags
+    }
+    api_opts = {opt for opt, (_, tags) in scoped.items() if "api_pricing" in tags}
+    sub_opts = {opt for opt, (_, tags) in scoped.items() if "subscription" in tags}
+    if not directional_opts or not api_opts or not sub_opts:
+        return
+    if api_opts == sub_opts:
+        return
+
+    for opt in directional_opts:
+        ce, _ = scoped[opt]
+        if ce.assessment in _DIRECTIONAL:
+            ce.assessment = CriterionAssessment.UNCERTAIN
+            ce.knowledge_coverage = KnowledgeCoverage.PARTIAL
 
 
 def _derive_lineage(
@@ -317,6 +389,9 @@ def validate_and_build_evaluation(
         metrics.evaluation_failed = True
         metrics.failure_reason = "material_recommendation_contamination"
         return None, metrics
+
+    for crit_label, _, _ in criterion_map.values():
+        _apply_cross_option_scope_guard(by_option, crit_label, catalog)
 
     evaluation = OptionEvaluation(
         decision=frame.decision,

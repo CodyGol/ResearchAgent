@@ -8,6 +8,7 @@ from services.query_router import BUDGETS, QueryComplexity, ResearchBudget
 from services.research_sufficiency import check_research_sufficiency
 from state import AgentState, Critique
 from utils.observability import trace_llm_call
+from utils.runtime_date import temporal_context_block
 
 
 async def critic_node(state: AgentState) -> AgentState:
@@ -74,6 +75,8 @@ CRITICAL RULES:
 - quality_score must reflect EVIDENCE quality, not search breadth."""
 
             user_prompt = f"""Research question: "{plan.query}"
+
+{temporal_context_block()}
 
 Sub-queries investigated:
 {chr(10).join(f"- {sq}" for sq in plan.sub_queries)}

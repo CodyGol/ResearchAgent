@@ -17,6 +17,7 @@ from services.report_consistency import run_consistency_checks
 from services.writer_schemas import EvidenceGroundedWriterOutput
 from state import AgentState, FinalReport
 from utils.observability import trace_llm_call
+from utils.runtime_date import temporal_context_block
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,8 @@ Critic assessment:
     with trace_llm_call("writer", "synthesize_evidence_grounded_report") as span:
         try:
             user_prompt = f"""Research question: {plan.query}
+
+{temporal_context_block()}
 
 {critique_block}
 

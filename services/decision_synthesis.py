@@ -83,7 +83,8 @@ RULES:
 - Do NOT invent options, criteria, claims, thresholds, weights, scores, or new facts
 - Do NOT use outside knowledge
 - Inferred criteria must not override unfavorable/unresolved primary explicit criteria
-- Absence of proof is NOT constraint violation — use not_established"""
+- Absence of proof is NOT constraint violation — use not_established
+- Do NOT treat one option's favorable evidence as comparative dominance when competing options lack comparable evidence on the same primary criterion (comparative coverage gap)"""
 
 
 def _normalize_label(label: str) -> str:
@@ -103,10 +104,6 @@ def _cap_status(
     return status
 
 
-def count_evaluation_pairs(option_evaluation: OptionEvaluation) -> int:
-    return sum(len(o.criteria_evaluations) for o in option_evaluation.option_evaluations)
-
-
 def build_oe_index(
     option_evaluation: OptionEvaluation,
 ) -> dict[tuple[str, str], CriterionReference]:
@@ -124,6 +121,74 @@ def build_oe_index(
                 claim_ids=list(ce.claim_ids),
             )
     return index
+
+
+def count_evaluation_pairs(option_evaluation: OptionEvaluation) -> int:
+    return sum(len(o.criteria_evaluations) for o in option_evaluation.option_evaluations)
+
+
+def detect_comparative_coverage_gaps(
+    frame: DecisionFrame,
+    oe_index: dict[tuple[str, str], CriterionReference],
+) -> list[str]:
+    """
+    Criteria where grounded directional evidence exists for some options but not others.
+
+    Absolute evidence for one option must not imply comparative dominance.
+    """
+    gaps: list[str] = []
+    for crit in frame.criteria:
+        if crit.origin != "explicit":
+            continue
+        crit_norm = _normalize_label(crit.label)
+        rows = [row for (_, c_key), row in oe_index.items() if c_key == crit_norm]
+        if len(rows) < 2:
+            continue
+
+        grounded_directional = [
+            row
+            for row in rows
+            if row.knowledge_coverage == KnowledgeCoverage.GROUNDED
+            and row.assessment
+            in (
+                CriterionAssessment.FAVORABLE,
+                CriterionAssessment.UNFAVORABLE,
+                CriterionAssessment.MIXED,
+            )
+        ]
+        weak_or_missing = [
+            row
+            for row in rows
+            if row.assessment == CriterionAssessment.INSUFFICIENT_INFORMATION
+            or row.knowledge_coverage == KnowledgeCoverage.INSUFFICIENT
+        ]
+        if grounded_directional and weak_or_missing:
+            gaps.append(crit.label)
+    return gaps
+
+
+def _apply_comparative_coverage_ceiling(
+    frame: DecisionFrame,
+    comparative_coverage_gaps: list[str],
+    ceiling: RecommendationStatus,
+) -> RecommendationStatus:
+    if not comparative_coverage_gaps:
+        return ceiling
+
+    explicit_primary = [
+        c.label for c in frame.criteria if c.origin == "explicit" and c.priority == "primary"
+    ]
+    if not explicit_primary:
+        return ceiling
+
+    primary_gaps = [label for label in comparative_coverage_gaps if label in explicit_primary]
+    if not primary_gaps:
+        return ceiling
+
+    ceiling = _cap_status(ceiling, RecommendationStatus.TENTATIVE_RECOMMENDATION)
+    if set(explicit_primary) <= set(primary_gaps):
+        return RecommendationStatus.INSUFFICIENT_BASIS
+    return ceiling
 
 
 def run_pre_check(frame: DecisionFrame, option_evaluation: OptionEvaluation) -> SynthesisPreCheck:
@@ -268,11 +333,18 @@ def compute_status_ceiling(
     limiting: list[CriterionReference],
     critical_missing_context: list[str],
     constraint_matrix_complete: bool = True,
+    comparative_coverage_gaps: list[str] | None = None,
 ) -> RecommendationStatus:
     ceiling = pre.status_ceiling
 
     if not constraint_matrix_complete:
         return RecommendationStatus.INSUFFICIENT_BASIS
+
+    ceiling = _apply_comparative_coverage_ceiling(
+        frame,
+        comparative_coverage_gaps or [],
+        ceiling,
+    )
 
     if critical_missing_context:
         ceiling = _cap_status(ceiling, RecommendationStatus.TENTATIVE_RECOMMENDATION)
@@ -503,6 +575,7 @@ def validate_and_build_synthesis(
             recommended_option = option_map[opt_key]
 
     status = llm_output.recommendation_status
+    comparative_gaps = detect_comparative_coverage_gaps(frame, oe_index)
     ceiling = compute_status_ceiling(
         frame,
         pre,
@@ -513,11 +586,15 @@ def validate_and_build_synthesis(
         limiting=limiting,
         critical_missing_context=critical_missing,
         constraint_matrix_complete=constraint_matrix_complete,
+        comparative_coverage_gaps=comparative_gaps,
     )
     status = _cap_status(status, ceiling)
 
     if status == RecommendationStatus.INSUFFICIENT_BASIS:
         recommended_option = None
+
+    if comparative_gaps and status == RecommendationStatus.RECOMMEND:
+        status = RecommendationStatus.TENTATIVE_RECOMMENDATION
 
     metrics.supporting_criterion_count = len(supporting)
     metrics.limiting_criterion_count = len(limiting)

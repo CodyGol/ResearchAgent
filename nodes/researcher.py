@@ -25,6 +25,8 @@ async def researcher_node(state: AgentState) -> AgentState:
     max_results = budget.get("max_results_per_search", 5)
     target_sources = budget.get("target_sources", 15)
     prioritize_auth = budget.get("prioritize_authoritative", False)
+    if state.get("decision_frame"):
+        prioritize_auth = True
 
     # Skip further searches if research already sufficient
     if state.get("research_sufficient") and state.get("iteration_count", 0) > 0:

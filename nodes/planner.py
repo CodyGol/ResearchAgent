@@ -3,8 +3,29 @@
 from langchain_anthropic import ChatAnthropic
 
 from config import settings
+from services.decision_research_coverage import merge_decision_coverage_into_plan
+from services.decision_framing_schemas import DecisionFrame
 from state import AgentState, ResearchPlan
 from utils.observability import trace_llm_call
+from utils.runtime_date import temporal_context_block
+
+
+def _apply_decision_coverage(
+    state: AgentState,
+    plan: ResearchPlan,
+    *,
+    max_queries: int,
+) -> ResearchPlan:
+    """Merge option×primary-criterion coverage queries when a decision frame exists."""
+    frame_data = state.get("decision_frame")
+    if not frame_data:
+        return plan
+    try:
+        frame = DecisionFrame(**frame_data)
+        return merge_decision_coverage_into_plan(plan, frame, max_queries=max_queries)
+    except Exception as coverage_err:
+        print(f"Decision coverage merge failed (non-critical): {coverage_err}")
+        return plan
 
 
 def _create_fallback_plan(query: str) -> ResearchPlan:
@@ -46,7 +67,11 @@ async def planner_node(state: AgentState) -> AgentState:
         plan_repo = _get_plan_repo()
         cached_plan = await plan_repo.get_cached_plan(query)
         if cached_plan:
-            state["research_plan"] = cached_plan
+            state["research_plan"] = _apply_decision_coverage(
+                state,
+                cached_plan,
+                max_queries=budget.get("max_search_queries", 3),
+            )
             state["current_node"] = "researcher"
             return state
     except Exception as e:
@@ -123,6 +148,7 @@ Cover multiple angles and perspectives."""
 
 Query: {query}
 Complexity: {complexity.upper()}
+{temporal_context_block()}
 {plan_hint}
 
 Generate:
@@ -173,8 +199,12 @@ Remember: You are a Senior Technical Researcher. Prioritize official docs, acade
                     # No JSON found, use fallback
                     plan_result = _create_fallback_plan(query)
 
-            # Trim sub-queries to budget
-            if plan_result.sub_queries and max_queries:
+            plan_result = _apply_decision_coverage(
+                state,
+                plan_result,
+                max_queries=max_queries,
+            )
+            if not state.get("decision_frame") and plan_result.sub_queries and max_queries:
                 plan_result = plan_result.model_copy(
                     update={"sub_queries": plan_result.sub_queries[:max_queries]}
                 )
