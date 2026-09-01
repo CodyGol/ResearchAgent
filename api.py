@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from graph import create_graph, create_run_config
+from services.decision_brief import build_decision_brief_payload
 from services.pipeline_init import create_initial_state, finalize_from_state
 from state import AgentState
 
@@ -199,6 +200,18 @@ async def event_generator(query: str):
                     "report_metrics": node_state.get("report_metrics"),
                     "error": None,
                 }
+
+                # Decision Brief: deterministic presentation payload (fail-open)
+                try:
+                    brief = build_decision_brief_payload(node_state)
+                    if brief:
+                        report_dict["decision_brief"] = brief
+                except Exception as brief_err:
+                    logger.warning(
+                        "Decision Brief payload assembly failed (omitting): %s",
+                        brief_err,
+                        exc_info=True,
+                    )
                 
                 # Yield final result
                 yield json.dumps({

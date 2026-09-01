@@ -3,6 +3,11 @@
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { DecisionBrief } from "@/components/DecisionBrief";
+import {
+  shouldShowDecisionBrief,
+  type DecisionBriefPayload,
+} from "@/lib/decision-brief";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 interface ResearchResponse {
@@ -13,6 +18,7 @@ interface ResearchResponse {
   iteration_count: number;
   quality_score?: number;
   error?: string;
+  decision_brief?: DecisionBriefPayload;
 }
 
 export default function Home() {
@@ -259,6 +265,28 @@ export default function Home() {
                   <div>Iterations: {result.iteration_count}</div>
                 </div>
               </div>
+
+              {shouldShowDecisionBrief(result.decision_brief) && (
+                <ErrorBoundary
+                  fallback={function DecisionBriefFallback() {
+                    return (
+                      <div className="text-green-700 text-sm border border-green-900 p-3">
+                        Decision Brief could not be displayed. The research report below is still available.
+                      </div>
+                    );
+                  }}
+                >
+                  <DecisionBrief brief={result.decision_brief} />
+                </ErrorBoundary>
+              )}
+
+              {shouldShowDecisionBrief(result.decision_brief) && (
+                <div className="border-t border-green-700 pt-4">
+                  <div className="text-green-500 font-semibold mb-4 tracking-wide">
+                    RESEARCH REPORT
+                  </div>
+                </div>
+              )}
 
               {/* Report Content */}
               <div className="prose prose-invert prose-green max-w-none text-green-400 [&>*]:mb-4 [&>h1]:text-green-300 [&>h1]:text-2xl [&>h1]:font-bold [&>h2]:text-green-300 [&>h2]:text-xl [&>h2]:font-semibold [&>h3]:text-green-300 [&>h3]:text-lg [&>p]:leading-relaxed [&>ul]:list-disc [&>ul]:ml-6 [&>ol]:list-decimal [&>ol]:ml-6 [&>code]:bg-green-900 [&>code]:px-1 [&>code]:rounded [&>pre]:bg-green-900 [&>pre]:p-4 [&>pre]:rounded [&>pre]:overflow-x-auto [&>blockquote]:border-l-4 [&>blockquote]:border-green-500 [&>blockquote]:pl-4 [&>blockquote]:italic">
