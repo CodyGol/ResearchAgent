@@ -47,6 +47,109 @@ _NEWS_DOMAINS = frozenset({
     "bloomberg.com",
 })
 
+_LOW_AUTHORITY_DOMAINS = frozenset({
+    "youtube.com",
+    "youtu.be",
+    "reddit.com",
+    "old.reddit.com",
+    "twitter.com",
+    "x.com",
+    "tiktok.com",
+})
+
+_BRAND_TLDS = frozenset({"com", "io", "ai", "dev", "co", "net", "org"})
+
+_VENDOR_OWNERSHIP_SUBDOMAINS = (
+    "docs.",
+    "api.",
+    "developer.",
+    "developers.",
+    "platform.",
+    "help.",
+    "support.",
+)
+
+_PUBLISHER_DOMAIN_SUFFIXES = frozenset({
+    "blog",
+    "news",
+    "reviews",
+    "review",
+    "hub",
+    "magazine",
+    "daily",
+})
+
+_PUBLISHER_PATH_SEGMENTS = frozenset({
+    "blog",
+    "news",
+    "articles",
+    "posts",
+    "tag",
+    "category",
+    "categories",
+    "author",
+})
+
+_VENDOR_INFRA_PATH_SEGMENTS = frozenset({
+    "api",
+    "docs",
+    "developer",
+    "developers",
+    "platform",
+    "pricing",
+    "products",
+    "enterprise",
+    "billing",
+    "plans",
+    "rates",
+    "rate",
+})
+
+
+def _path_segments(url: str) -> list[str]:
+    path = urlparse(url).path.lower().strip("/")
+    return [segment for segment in path.split("/") if segment]
+
+
+def _domain_label(domain: str) -> str:
+    parts = domain.split(".")
+    return parts[0] if parts else ""
+
+
+def _looks_like_publisher_domain(domain: str) -> bool:
+    label = _domain_label(domain)
+    return any(label.endswith(suffix) for suffix in _PUBLISHER_DOMAIN_SUFFIXES)
+
+
+def is_likely_first_party_vendor_site(domain: str, url: str) -> bool:
+    """
+    Whether a URL likely belongs to a vendor's own site (ownership-first heuristic).
+
+    Domain/subdomain identity establishes ownership. Path segments may confirm vendor
+    infrastructure pages on an owned domain, but path tokens alone never establish ownership.
+    """
+    if any(domain == blocked or domain.endswith(f".{blocked}") for blocked in _LOW_AUTHORITY_DOMAINS):
+        return False
+
+    if any(domain.startswith(prefix) for prefix in _VENDOR_OWNERSHIP_SUBDOMAINS):
+        return True
+
+    parts = domain.split(".")
+    if len(parts) >= 3 and parts[0] in {
+        "docs", "api", "developer", "developers", "platform", "help", "support",
+    }:
+        return True
+
+    if len(parts) == 2 and parts[1] in _BRAND_TLDS:
+        if _looks_like_publisher_domain(domain):
+            return False
+        segments = _path_segments(url)
+        if not segments or segments[0] in _PUBLISHER_PATH_SEGMENTS:
+            return False
+        return segments[0] in _VENDOR_INFRA_PATH_SEGMENTS
+
+    return False
+
 
 def _extract_domain(url: str) -> str:
     try:
@@ -57,6 +160,10 @@ def _extract_domain(url: str) -> str:
 
 
 def _classify_source_type(url: str, domain: str) -> SourceType:
+    if any(domain == blocked or domain.endswith(f".{blocked}") for blocked in _LOW_AUTHORITY_DOMAINS):
+        return SourceType.WEB
+    if is_likely_first_party_vendor_site(domain, url):
+        return SourceType.OFFICIAL
     if any(academic in domain for academic in _ACADEMIC_DOMAINS):
         return SourceType.ACADEMIC
     if domain in _SPORTS_OFFICIAL_DOMAINS or any(
@@ -72,7 +179,11 @@ def _classify_source_type(url: str, domain: str) -> SourceType:
     return SourceType.WEB
 
 
-def _classify_source_quality(source_type: SourceType, domain: str) -> SourceQuality:
+def _classify_source_quality(source_type: SourceType, domain: str, url: str = "") -> SourceQuality:
+    if any(domain == blocked or domain.endswith(f".{blocked}") for blocked in _LOW_AUTHORITY_DOMAINS):
+        return SourceQuality.USER_GENERATED
+    if is_likely_first_party_vendor_site(domain, url):
+        return SourceQuality.OFFICIAL
     if source_type == SourceType.ACADEMIC:
         return SourceQuality.ACADEMIC
     if source_type == SourceType.OFFICIAL or domain.endswith(".gov"):
@@ -114,7 +225,7 @@ def normalize_search_result(
     """
     domain = _extract_domain(result.url)
     source_type = _classify_source_type(result.url, domain)
-    source_quality = _classify_source_quality(source_type, domain)
+    source_quality = _classify_source_quality(source_type, domain, result.url)
     content = result.content or ""
     now = datetime.now(timezone.utc)
 

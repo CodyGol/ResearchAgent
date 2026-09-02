@@ -4,6 +4,7 @@ import pytest
 
 from domain.models import SourceQuality, SourceType
 from services.source_normalizer import (
+    is_likely_first_party_vendor_site,
     normalize_claim_text,
     normalize_search_result,
     normalize_search_results,
@@ -41,6 +42,16 @@ class TestNormalizeSearchResult:
         assert source.source_type == SourceType.OFFICIAL
         assert source.source_quality == SourceQuality.OFFICIAL
 
+    def test_classifies_vendor_pricing_page_as_official(self):
+        result = SearchResult(
+            title="API Pricing",
+            url="https://openai.com/api/pricing",
+            content="Token pricing.",
+            score=0.8,
+        )
+        source = normalize_search_result(result, research_run_id=20)
+        assert source.source_quality == SourceQuality.OFFICIAL
+
     def test_classifies_news_domain(self):
         result = SearchResult(
             title="Market News",
@@ -51,6 +62,74 @@ class TestNormalizeSearchResult:
         source = normalize_search_result(result, research_run_id=3)
         assert source.source_type == SourceType.NEWS
         assert source.source_quality == SourceQuality.REPUTABLE_SECONDARY
+
+
+class TestFirstPartyOwnershipClassification:
+    def test_third_party_api_path_not_official(self):
+        result = SearchResult(
+            title="Claude API Cost",
+            url="https://apidog.com/blog/claude-api-cost",
+            content="Third-party commentary on Claude API costs.",
+            score=0.9,
+        )
+        source = normalize_search_result(result, research_run_id=30)
+        assert source.source_quality != SourceQuality.OFFICIAL
+        assert source.source_type != SourceType.OFFICIAL
+
+    def test_third_party_pricing_path_not_official(self):
+        result = SearchResult(
+            title="Vendor A Pricing",
+            url="https://exampleblog.com/pricing/vendor-a",
+            content="Blog roundup of vendor pricing.",
+            score=0.9,
+        )
+        source = normalize_search_result(result, research_run_id=31)
+        assert source.source_quality != SourceQuality.OFFICIAL
+
+    def test_legitimate_first_party_pricing_on_owned_domain(self):
+        result = SearchResult(
+            title="Pricing",
+            url="https://vendor.com/pricing",
+            content="Official pricing table.",
+            score=0.9,
+        )
+        source = normalize_search_result(result, research_run_id=32)
+        assert source.source_quality == SourceQuality.OFFICIAL
+
+    def test_legitimate_first_party_docs_subdomain(self):
+        result = SearchResult(
+            title="API Pricing",
+            url="https://docs.vendor.example/api/pricing",
+            content="Official API pricing documentation.",
+            score=0.9,
+        )
+        source = normalize_search_result(result, research_run_id=33)
+        assert source.source_quality == SourceQuality.OFFICIAL
+
+    def test_brand_split_product_domain_pricing_stays_official(self):
+        result = SearchResult(
+            title="Claude Pricing",
+            url="https://claude.com/pricing",
+            content="Anthropic Claude pricing.",
+            score=0.9,
+        )
+        source = normalize_search_result(result, research_run_id=34)
+        assert source.source_quality == SourceQuality.OFFICIAL
+
+    @pytest.mark.parametrize(
+        ("url", "expected_official"),
+        [
+            ("https://apidog.com/blog/claude-api-cost", False),
+            ("https://openai.com/api/pricing", True),
+            ("https://docs.vendor.example/api/pricing", True),
+        ],
+    )
+    def test_deterministic_classification_examples(self, url: str, expected_official: bool):
+        from urllib.parse import urlparse
+
+        domain = urlparse(url).netloc.removeprefix("www.")
+        is_official = is_likely_first_party_vendor_site(domain, url)
+        assert is_official is expected_official
 
 
 class TestDeduplication:

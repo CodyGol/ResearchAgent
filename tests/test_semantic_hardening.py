@@ -203,8 +203,8 @@ class TestDecisionResearchCoverage:
         )
         queries = build_coverage_subqueries(frame)
         assert len(queries) == 2
-        assert any("OpenAI" in q and "Cost" in q for q in queries)
-        assert any("Anthropic" in q and "Cost" in q for q in queries)
+        assert any("OpenAI" in q and "pricing" in q.lower() and "official" in q.lower() for q in queries)
+        assert any("Anthropic" in q and "pricing" in q.lower() and "official" in q.lower() for q in queries)
 
     def test_merge_prepends_coverage_queries(self):
         frame = DecisionFrame(
@@ -224,6 +224,7 @@ class TestDecisionResearchCoverage:
         merged = merge_decision_coverage_into_plan(plan, frame, max_queries=3)
         assert len(merged.sub_queries) == 3
         assert "OpenAI" in merged.sub_queries[0]
+        assert "official" in merged.sub_queries[0].lower()
         assert "Anthropic" in merged.sub_queries[1]
 
 
